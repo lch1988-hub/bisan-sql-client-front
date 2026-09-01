@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
+/* CSS 변수 정의 - 라이트 모드 기본값 */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f1f5f9;      /* slate-100 */
+  --foreground: #0f172a;      /* slate-900 */
 }
 
 @theme inline {
@@ -12,15 +13,124 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* 기본 배경 - Tailwind 클래스가 오버라이드할 수 있도록 !important 제거 */
+html, body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+/* AG Grid 다크 테마 */
+.dark .ag-theme-quartz {
+  --ag-background-color: #1e293b !important;
+  --ag-foreground-color: #f1f5f9 !important;
+  --ag-header-background-color: #334155 !important;
+  --ag-header-foreground-color: #e2e8f0 !important;
+  --ag-border-color: #475569 !important;
+  --ag-data-color: #cbd5e1 !important;
+  --ag-secondary-text-color: #94a3b8 !important;
+  --ag-selected-row-background-color: rgba(99, 102, 241, 0.2) !important;
+  --ag-active-item-background-color: #0f172a !important;
+  --ag-range-selection-border-color: #6366f1 !important;
+  --ag-control-panel-background-color: #1e293b !important;
+}
+
+/* AG Grid 다크 모드 헤더 */
+.dark .ag-theme-quartz .ag-header-cell {
+  background: linear-gradient(to bottom, #475569, #334155) !important;
+  border-bottom: 1px solid #475569 !important;
+}
+
+/* AG Grid 다크 모드 행 */
+.dark .ag-theme-quartz .ag-row-hover {
+  background-color: #334155 !important;
+}
+
+/* Monaco 에디터 다크 모드 */
+.dark .monaco-editor-bgcolor,
+.dark .monaco-editor-container {
+  background-color: #0f172a !important;
+}
+
+/* 다크 모드 변수 오버라이드 */
+html.dark,
+body.dark {
+  --background: #0f172a;      /* slate-900 */
+  --foreground: #f1f5f9;      /* slate-100 */
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* 전체 페이지 배경색 - 매우 강력한 우선순위 */
+html, body {
+  background-color: var(--background) !important;
+}
+
+/* 다크 모드 시 HTML 태그에 강제 적용 */
+html.dark,
+html.dark body {
+  background-color: #0f172a !important;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  padding: 0;
+  color: var(--foreground);
+}
+
+/* AG Grid 다크 테마 */
+.dark .ag-theme-quartz {
+  --ag-background-color: #1e293b !important;       /* slate-800 */
+  --ag-foreground-color: #f1f5f9 !important;       /* slate-100 */
+  --ag-header-background-color: #334155 !important; /* slate-700 */
+  --ag-header-foreground-color: #e2e8f0 !important; /* slate-200 */
+  --ag-border-color: #475569 !important;             /* slate-600 */
+  --ag-data-color: #cbd5e1 !important;               /* slate-300 */
+  --ag-secondary-text-color: #94a3b8 !important;     /* slate-400 */
+  --ag-selected-row-background-color: rgba(99, 102, 241, 0.2) !important;
+  --ag-active-item-background-color: #0f172a !important; /* slate-900 */
+  --ag-range-selection-border-color: #6366f1 !important;
+  --ag-control-panel-background-color: #1e293b !important;
+}
+
+/* AG Grid 다크 모드 헤더 스타일 */
+.dark .ag-theme-quartz .ag-header-cell {
+  background: linear-gradient(to bottom, #475569, #334155) !important;
+  border-bottom: 1px solid #475569 !important;
+}
+
+/* AG Grid 다크 모드 행 스타일 */
+.dark .ag-theme-quartz .ag-row-hover {
+  background-color: #334155 !important;
+}
+
+/* Monaco 에디터 배경 색상 (다크 모드) */
+.dark .monaco-editor-bgcolor,
+.dark .monaco-editor-container {
+  background-color: #0f172a !important;
+}
+
+/* Tailwind 클래스 우선순위 확보을 위한 하위 선택자 */
+html.dark * {
+  background-image: none !important; /* 배경 이미지 무시 */
+}
+
+/* 프로그레스바 애니메이션 - 눈에 확 띄는 스타일 */
+@keyframes progress-shimmer {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(100vw); }
+  100% { transform: translateX(-100%); }
+}
+
+.animate-progress {
+  animation: progress-shimmer 1.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  opacity: 0.9;
 }

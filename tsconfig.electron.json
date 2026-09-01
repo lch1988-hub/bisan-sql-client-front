@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "module": "CommonJS",          // Node.js/Electron 메인 프로세스용 표준 모듈 방식
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": false,               // 컴파일된 main.js 파일을 실제로 뱉어내야 하므로 false
+    "outDir": "./"                 // 결과물인 main.js가 프로젝트 루트 최상위에 떨어지도록 설정
+  },
+  "include": [
+    "main.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next",
+    "out"
+  ]
+}
