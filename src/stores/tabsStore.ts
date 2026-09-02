@@ -1,13 +1,14 @@
 import { create } from 'zustand';
 import { persist, type StorageValue, type StateStorage } from 'zustand/middleware';
 import { COMMAND_TYPE, type CommandTypeValue } from '../constants/commandTypes';
-import {ParsedSelectData} from "../schemas/formSchema";
+import { ParsedSelectData } from "../schemas/formSchema";
 import { 
   saveQueryResult, 
   restoreQueryResult, 
   saveTabMetadata, 
   restoreTabMetadata,
-  clearExpiredData
+  clearExpiredData,
+  clearQueryResult  // IndexedDB 에서 탭 데이터 삭제 추가
 } from '@/lib/storage';
 
 // ========================================
@@ -163,6 +164,11 @@ export const useTabsStore = create<TabsState>()(
                         
                         const tabIndex = state.tabs.findIndex(t => t.id === id);
                         if (tabIndex === -1) return state;
+
+                        // IndexedDB 에서 해당 탭의 쿼리 결과 삭제
+                        if (typeof window !== 'undefined') {
+                            void clearQueryResult(id);
+                        }
 
                         const newTabs = state.tabs.filter((t: TabData) => t.id !== id);
                         

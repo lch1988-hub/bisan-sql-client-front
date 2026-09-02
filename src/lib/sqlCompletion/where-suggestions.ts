@@ -143,7 +143,8 @@ export function createWhereFallbackSuggestions(
 export function handleWhereCompletion(
     currentWordUpper: string,
     effectiveCurrentWord: string,
-    targetTableName: string | null,
+    targetTableName: string | null,  // For backward compatibility
+    targetTableNames: string[],  // NEW: 모든 FROM 테이블 배열
     partialNameFromInput: string | null,
     aliasToTableName: Record<string, string>,
     tableColumns: TableColumns | undefined,
@@ -311,9 +312,71 @@ export function handleWhereCompletion(
         return createWhereFallbackSuggestions(tableColumns, sqlKeywords, monacoLanguages);
     }
 
-    // Case 2: 점없는 입력 - 테이블명/alias 제안
-    console.log('[WhereCompletion]  No dot detected  suggesting tables');
+    // Case 2: 점이 없는 입력 - 테이블명/alias 제안 또는 컬럼 필터링
+    console.log('[WhereCompletion]  No dot detected', { 
+        targetTableName, 
+        targetTableNames,  // NEW: 모든 FROM 테이블 배열
+        partialNameFromInput,
+        hasAvailableColumns: !!tableColumns?.[targetTableName || '']
+    });
 
+    // [NEW] targetTableNames 이 있으면 해당 테이블들의 컬럼을 모아서 제안
+    if (targetTableNames && targetTableNames.length > 0) {
+        const allMatchingCols: CompletionItem[] = [];
+        
+        for (const tableName of targetTableNames) {
+            if (tableColumns?.[tableName]) {
+                const columns = tableColumns[tableName];
+                
+                if (partialNameFromInput) {
+                    // 사용자가 입력한 부분 ('S') 에 맞는 컬럼만 필터링
+                    const matchingCols = columns.filter(col => 
+                        col.toUpperCase().includes(partialNameFromInput.toUpperCase())
+                    );
+                    
+                    console.log('[WhereCompletion]  Filtering columns from', tableName, 
+                               'with partial:', partialNameFromInput, '→ Found', matchingCols.length);
+                    
+                    for (const col of matchingCols.slice(0, 50)) {
+                        allMatchingCols.push({
+                            label: col,
+                            kind: monacoLanguages.CompletionItemKind.Field,
+                            insertText: col,
+                            detail: `Column from ${tableName}`,
+                            documentation: `${tableName}.${col}`,
+                            sortText: '1'
+                        });
+                    }
+                } else {
+                    // partialName 이 없으면 모든 컬럼 제안 (모든 FROM 테이블)
+                    console.log('[WhereCompletion]  No partial input, showing ALL columns from', tableName);
+                    
+                    for (const col of columns.slice(0, 50)) {
+                        allMatchingCols.push({
+                            label: col,
+                            kind: monacoLanguages.CompletionItemKind.Field,
+                            insertText: col,
+                            detail: `Column from ${tableName}`,
+                            documentation: `${tableName}.${col}`,
+                            sortText: '1'
+                        });
+                    }
+                }
+            }
+        }
+        
+        // 최대 50 개까지 반환 (중복 제거 후)
+        const deduplicated = allMatchingCols.filter((item, index, self) => 
+            index === self.findIndex(other => other.label === item.label)
+        );
+        
+        if (deduplicated.length > 0) {
+            console.log('[WhereCompletion]  Returning', deduplicated.length, 'columns from ALL target tables');
+            return deduplicated.slice(0, 50);
+        }
+    }
+
+    // 기존 로직: 테이블명 제안 시도
     if (partialNameFromInput) {
         const tableSuggestions = createWhereTableSuggestions(
             partialNameFromInput,

@@ -172,6 +172,31 @@ export async function restoreTabMetadata(tabId: string): Promise<CachedTabMetada
 // ============================================
 
 /**
+ * 특정 탭의 쿼리 결과 삭제 (탭 닫기 사용)
+ */
+export async function clearQueryResult(tabId: string): Promise<void> {
+  try {
+    const resultDb = await initDB();
+    
+    // tabId 로 연결된 모든 결과 삭제
+    const allResults: CachedResult[] = await resultDb.getAll(RESULTS_STORE);
+    const tabResults = allResults.filter(item => item.tabId === tabId);
+    
+    for (const result of tabResults) {
+      await resultDb.delete(RESULTS_STORE, result.id);
+      console.log(`탭 결과 삭제 완료: ${result.id}`);
+    }
+    
+    if (tabResults.length > 0) {
+      console.log(`탭 [${tabId}] 의 IndexedDB 에서 ${tabResults.length}개의 결과 삭제됨`);
+    }
+  } catch (error) {
+    console.error('쿼리 결과 삭제 실패:', error);
+    throw error;
+  }
+}
+
+/**
  * 오래된 데이터 정리 (보존 기간: 7 일)
  */
 export async function clearExpiredData(daysToKeep: number = 7): Promise<void> {

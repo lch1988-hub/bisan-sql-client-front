@@ -178,7 +178,8 @@ export function createCompletionSuggestions(
     // 5. FROM 절에서 테이블이 실제로 추출되었는지 확인
     const hasValidTableInFROM = Object.keys(aliasToTableName).length > 0;
     
-    let targetTableName: string | null = null;
+    let targetTableName: string | null = null;	    let targetTableNames: string[] = [];
+
     let partialNameFromInput: string | null = null;
     let isInsideSelectOnly = false;
     let isDotFormatWithoutTrailingDot: boolean = false;  //  "A<P>" 패턴 (A.P 에서 P 입력 중)
@@ -226,7 +227,15 @@ export function createCompletionSuggestions(
     } else if (currentClause === 'WHERE') {
         // WHERE 절에서 테이블명/alias 추출 - handleWhereCompletion 에 위임을 위한 파싱 정보 설정
         const result = resolveAliasInWHERE(effectiveCurrentWord, aliasToTableName, tableColumns);
-        targetTableName = result.targetTableName;
+        
+        // 배열로 처리: 첫 번째 값을 targetTableName 으로 사용 (backward compatibility)
+        if (result.targetTableNames && result.targetTableNames.length > 0) {
+            targetTableNames = result.targetTableNames;
+            targetTableName = result.targetTableNames[0];
+        } else {
+            targetTableNames = [];
+            targetTableName = null;
+        }
         partialNameFromInput = result.partialNameFromInput;
 
     } else if (!currentClause) {
@@ -343,7 +352,8 @@ export function createCompletionSuggestions(
         return handleWhereCompletion(
             currentWordUpper,
             effectiveCurrentWord,
-            targetTableName,
+            targetTableName,  // backward compatibility 용 단일 값
+            targetTableNames,  // NEW: 모든 FROM 의 테이블 목록 (배열)
             partialNameFromInput,
             aliasToTableName,
             tableColumns,
@@ -390,3 +400,5 @@ export function createCompletionSuggestions(
         return createFallbackSuggestions(sqlKeywords, tableColumns);
     }
 }
+
+

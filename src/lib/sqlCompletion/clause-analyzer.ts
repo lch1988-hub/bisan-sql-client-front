@@ -24,17 +24,20 @@ export interface KeywordWithContextInfo {
 
 /**
  * 텍스트 전역에서 모든 키워드 위치와 해당 parentheses 깊이 기록
+ * Line endings(\r\n, \r) 를 정규화하여 정확하게 파싱
  */
 export function findKeywordsWithContext(text: string): KeywordWithContextInfo {
-    const upperText = text.toUpperCase();
+    // Line ending 정규화: \r\n → \n, 나머지 \r → \n
+    const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const upperText = normalizedText.toUpperCase();
 
     let selectPos = -1, fromPos = -1, wherePos = -1, groupByPos = -1, orderByPos = -1;
     let lastSelectDepth = -1, lastFromDepth = -1, lastWhereDepth = -1, lastGroupByDepth = -1, lastOrderByDepth = -1;
     let currentDepth = 0;
 
-    // 텍스트 한 글자씩 순회하면서 parentheses 깊이 추적 + 키워드 찾기
-    for (let i = 0; i < text.length; i++) {
-        const char = text[i];
+    // 정규화된 텍스트 한 글자씩 순회하면서 parentheses 깊이 추적 + 키워드 찾기
+    for (let i = 0; i < normalizedText.length; i++) {
+        const char = normalizedText[i];
 
         if (char === '(') {
             currentDepth++;
@@ -42,54 +45,53 @@ export function findKeywordsWithContext(text: string): KeywordWithContextInfo {
             currentDepth = Math.max(0, currentDepth - 1);
         }
 
-        // 키워드 찾기 (문자열 끝에서 시작되는지 확인)
-        // SELECT 키워드: (^|[whitespace])SELECT([whitespace]|$)
-        const remainingText = text.substring(i);
+        // 키워드 찾기: 공백/\n/\r 무시, 정확한 단어만 매칭
+        const remainingText = normalizedText.substring(i);
 
-        if (/^(\s|\n|\r)*SELECT(\s|\n|\r|$)/i.test(remainingText)) {
+        if (/^(?:\s|[\r\n])*SELECT(?=\s|[\r\n]|$)/i.test(remainingText)) {
             selectPos = i;
             lastSelectDepth = currentDepth;
-            // 키워드 길이만큼 skip (6 자: SELECT)
-            const keywordMatch = remainingText.match(/^(?:\s+|[\n\r]+)?SELECT/i);
+            // 키워드 길이만큼 skip (공백 무시)
+            const keywordMatch = remainingText.match(/^(?:\s)*SELECT/i);
             if (keywordMatch) {
-                i += keywordMatch[0].length - 1;  // -1 이므로 for loop 의 ++ 과 합쳐짐
+                i += keywordMatch[0].length - 1;
             }
-        } else if (/^(\s|\n|\r)*FROM(\s|\n|\r|$)/i.test(remainingText)) {
+        } else if (/^(?:\s|[\r\n])*FROM(?=\s|[\r\n]|$)/i.test(remainingText)) {
             fromPos = i;
             lastFromDepth = currentDepth;
-            const keywordMatch = remainingText.match(/^(?:\s+|[\n\r]+)?FROM/i);
+            const keywordMatch = remainingText.match(/^(?:\s)*FROM/i);
             if (keywordMatch) {
                 i += keywordMatch[0].length - 1;
             }
-        } else if (/^(\s|\n|\r)*WHERE(\s|\n|\r|$)/i.test(remainingText)) {
+        } else if (/^(?:\s|[\r\n])*WHERE(?=\s|[\r\n]|$)/i.test(remainingText)) {
             wherePos = i;
             lastWhereDepth = currentDepth;
-            const keywordMatch = remainingText.match(/^(?:\s+|[\n\r]+)?WHERE/i);
+            const keywordMatch = remainingText.match(/^(?:\s)*WHERE/i);
             if (keywordMatch) {
                 i += keywordMatch[0].length - 1;
             }
-        } else if (/^(\s|\n|\r)*GROUP\s+BY(\s|\n|\r|$)/i.test(remainingText)) {
+        } else if (/^(?:\s|[\r\n])*GROUP\s+BY(?=\s|[\r\n]|$)/i.test(remainingText)) {
             groupByPos = i;
             lastGroupByDepth = currentDepth;
-            const keywordMatch = remainingText.match(/^(?:\s+|[\n\r]+)?GROUP\s+BY/i);
+            const keywordMatch = remainingText.match(/^(?:\s)*GROUP\s+BY/i);
             if (keywordMatch) {
                 i += keywordMatch[0].length - 1;
             }
-        } else if (/^(\s|\n|\r)*ORDER\s+BY(\s|\n|\r|$)/i.test(remainingText)) {
+        } else if (/^(?:\s|[\r\n])*ORDER\s+BY(?=\s|[\r\n]|$)/i.test(remainingText)) {
             orderByPos = i;
             lastOrderByDepth = currentDepth;
-            const keywordMatch = remainingText.match(/^(?:\s+|[\n\r]+)?ORDER\s+BY/i);
+            const keywordMatch = remainingText.match(/^(?:\s)*ORDER\s+BY/i);
             if (keywordMatch) {
                 i += keywordMatch[0].length - 1;
             }
         }
     }
 
-    // 마지막 깊이가 현재 커서의 깊이
+    // 마지막 깊이가 현재 커서의 깊이 (정규화된 텍스트 사용)
     currentDepth = 0;
-    for (let i = 0; i < text.length; i++) {
-        if (text[i] === '(') currentDepth++;
-        else if (text[i] === ')') currentDepth = Math.max(0, currentDepth - 1);
+    for (let i = 0; i < normalizedText.length; i++) {
+        if (normalizedText[i] === '(') currentDepth++;
+        else if (normalizedText[i] === ')') currentDepth = Math.max(0, currentDepth - 1);
     }
 
     return {
@@ -98,8 +100,9 @@ export function findKeywordsWithContext(text: string): KeywordWithContextInfo {
     };
 }
 
+
 /**
- * 문자열 내 키워드 위치 찾기 (공백, 줄바꿈 무시, 정확히 단어만 매칭)  - 기존 함수 유지 (호환성용)
+ * 문자열 내 키워드 위치 찾기 (공백, 줄바꿈 무시, 정확히 단어만 매칭) - 기존 함수 유지 (호환성용)
  */
 export function findKeywordPosition(text: string, keyword: string): number {
     const regex = new RegExp(`(^|[\\s\\n\\r])${keyword}(?=[\\s\\n\\r]|$)`, 'i');
@@ -116,8 +119,12 @@ export function findKeywordPosition(text: string, keyword: string): number {
 /**
  * 쿼리 텍스트에서 SELECT, FROM, WHERE, GROUP BY 의 위치를 찾아분석
  * Nested query 를 고려하여 현재 parentheses 깊이 내에서 가장 최근 절만 추적
+ * @param fullQuery - 전체 쿼리 텍스트
+ * @param cursorOffset - 커서 위치 (offset)
  */
-export function analyzeSQLClauses(textBeforeCursor: string): ParsingResult {
+export function analyzeSQLClauses(fullQuery: string, cursorOffset: number = fullQuery.length): ParsingResult {
+    // 커서까지의 텍스트만 분석 (나머지 부분은 아직 입력되지 않음)
+    const textBeforeCursor = fullQuery.substring(0, cursorOffset);
     const upperText = textBeforeCursor.toUpperCase();
 
     // 새로운 방식: parentheses 깊이 고려
