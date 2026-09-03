@@ -10,6 +10,7 @@ import { parseQueryContext } from './contextAnalyzer';
 import { extractCurrentWord } from './wordExtractor';
 import { logNestedContext, findCurrentSelectInfo, calculateParenDepth, findSelectPositions } from './debugUtils';
 import { createMatchingTableSuggestions, createFallbackSuggestions } from './fallback-handler';
+import { buildScopeStack, type SelectScope } from './scopeStack';  // New Scope Stack integration
 
 // 절별 자동완성 모듈
 import { handleWhereCompletion } from './where-suggestions';
@@ -145,55 +146,147 @@ export function createCompletionSuggestions(
         }
     }
 
-    // 3. 절 분석 (nested query 고려 - 공통 로직)
+    // 3. 절 분석 (nested query 고려 - 새로 구현된 Scope Stack 사용)
     let aliasToTableName: Record<string, string> = {};
+    let activeScopeDepth = 0;
+    let parsedStack: any = null;  // Store parsedStack for access outside try-catch
+    
     try {
-        const scopedResult = extractScopedAliases(currentQuery, cursorOffsetInQuery || 0);
-
-        console.log('[COMPLETION] SCOPE-AWARE ALIAS EXTRACTION:', {
-            isNested: scopedResult.isNested,
-            currentDepth: scopedResult.isNested ? 'nested' : 'root',
-            localAliases: Object.keys(scopedResult.localAliases).join(', ') || 'none'
+        // NEW: Use scope stack for proper nested query handling
+        parsedStack = buildScopeStack(currentQuery, cursorOffsetInQuery || 0);
+        const activeScope = parsedStack.cursorContext.activeScope;
+        activeScopeDepth = parsedStack.cursorContext.calculatedDepth;  // Single source of truth for depth
+        
+        console.log('[COMPLETION] SCOPE STACK ACTIVE:', {
+            depth: activeScopeDepth,
+            hasActiveScope: !!activeScope,
+            lastKeyword: activeScope?.clauses[activeScope.clauses.length - 1]?.type || 'none',
+            clauseCount: activeScope?.clauses.length || 0
         });
 
-        aliasToTableName = scopedResult.localAliases;  // INNER scope 만 사용 (Oracle 규칙 준수)
+        // Extract alias mappings from ACTIVE SCOPE only (respecting nested boundaries)
+        if (activeScope && activeScope.clauses.length > 0) {
+            const fromClause = activeScope.clauses.find((c: SelectScope['clauses'][number]) => c.type === 'FROM');
+            if (fromClause && fromClause.position < (cursorOffsetInQuery || 0)) {
+                // Only use FROM clause that appears BEFORE cursor position
+                const fromTextStart = fromClause.position;
+                let fromTextEnd = fromClause.endIndex ?? currentQuery.length;
+                
+                // Find next keyword boundary to avoid including outer scope content
+                for (const clause of activeScope.clauses) {
+                    if (clause.position > fromClause.position && 
+                        clause.position < cursorOffsetInQuery) {
+                        fromTextEnd = Math.min(fromTextEnd, clause.position);
+                    }
+                }
+                
+                const scopeSegment = currentQuery.substring(fromTextStart, fromTextEnd);
+                aliasToTableName = extractFromClause(scopeSegment);
+                
+                console.log('[COMPLETION] SCOPE-AWARE ALIAS EXTRACTION:', {
+                    depth: activeScopeDepth,
+                    segmentLength: scopeSegment.length,
+                    localAliases: Object.keys(aliasToTableName).join(', ') || 'none'
+                });
+            }
+        } else if (activeScope && !activeScope.clauses.some((c: SelectScope['clauses'][number]) => c.type === 'FROM')) {
+            // No FROM clause yet in current scope - CRITICAL: do NOT fall back to outer query!
+            // This is a nested subquery that hasn't reached its own FROM clause yet
+            console.log('[COMPLETION] No FROM clause in active scope - using empty aliases (CORRELATED SUBQUERY SAFE)');
+            aliasToTableName = {};  // Explicitly set to empty, NEVER fall back to outer query here!
+        }
+        
+        // Fallback to full query extraction ONLY when we truly have no scope context at all
+        // This should RARELY happen - only for malformed queries or edge cases
+        if (Object.keys(aliasToTableName).length === 0 && !activeScope) {
+            console.warn('[Completion] No active scope found, falling back to legacy (should be rare)');
+            const fallbackMapping = extractFromClause(currentQuery);
+            aliasToTableName = fallbackMapping || {};
+        }
     } catch(err) {
         console.error('[Completion] Scoped extraction failed:', err);
         const fallbackMapping = extractFromClause(currentQuery);
         aliasToTableName = fallbackMapping || {};
     }
 
-    // 4. 절 분석 (nested query 고려)
-    const { currentClause, lastFromIdx } = analyzeSQLClauses(textBeforeCursor);
-
-    // Debug logging - 전용 모듈 위임
-    logNestedContext(textBeforeCursor, currentClause, lastFromIdx, aliasToTableName);
+    // 4. 절 분석 - NOW USES activeScopeDepth from scopeStack as SINGLE SOURCE OF TRUTH
+    // CRITICAL: Use parsedStack for all depth-dependent operations to ensure consistency
+    const cursorOffsetFinal = cursorOffsetInQuery > 0 ? cursorOffsetInQuery : (currentQuery.length - 1);
     
-    // 현재 parentheses 깊이 계산 및 SELECT 정보 추출
-    const parenDepth = calculateParenDepth(textBeforeCursor);
-    const selectPositions = findSelectPositions(textBeforeCursor);
-    const isNestedQuery = parenDepth > 0;
-    const currentSelectInfo = findCurrentSelectInfo(textBeforeCursor, parenDepth);
+    // For backward compatibility with existing clause analyzer, we still call it
+    // BUT priority is given to activeScope from scopeStack for all nested query decisions
+    let { currentClause, lastFromIdx } = analyzeSQLClauses(currentQuery, cursorOffsetFinal);
+    
+    // CRITICAL FIX: Override currentClause based on activeScope context for nested queries
+    // If we're in a nested scope (activeScopeDepth > 0) and activeScope has no FROM clause yet,
+    // NEVER fall back to outer query's FROM - force SELECT-only mode
+    if (parsedStack && parsedStack.cursorContext.activeScope) {
+        const activeScopeClauses = parsedStack.cursorContext.activeScope.clauses;
+        const hasActiveFromClause = activeScopeClauses.some((c: any) => c.type === 'FROM');
+        
+        // Check cursor position in current scope
+        const lastKeywordInCurrentScope = activeScopeClauses[activeScopeClauses.length - 1];
+        
+        if (activeScopeDepth > 0 && !hasActiveFromClause && (!lastKeywordInCurrentScope || lastKeywordInCurrentScope.type === 'SELECT')) {
+            // We're inside a nested subquery that hasn't reached its FROM clause yet
+            // Force currentClause to null (SELECT-only mode), regardless of what analyzeSQLClauses returned
+            if (currentClause === 'FROM') {
+                console.log('[COMPLETION] OVERRIDING FROM → SELECT (nested subquery before FROM):', {
+                    clauseAnalyzerReturned: currentClause,
+                    activeScopeDepth,
+                    scopeClauses: activeScopeClauses.map((c: any) => c.type).join(', ')
+                });
+                currentClause = null;  // Force SELECT-only mode
+            }
+        }
+    }
+    
+    // CRITICAL FIX #2: Alias.column incomplete detection (e.g., "SELECT B." or "WHERE T.")
+    // If user typed "alias.", suggest columns from that table
+    let isInsideSelectOnly = false;  // Declare early to avoid hoisting issues
+    
+    if (effectiveCurrentWord && effectiveCurrentWord.endsWith('.') && effectiveCurrentWord.length > 1) {
+        const aliasName = effectiveCurrentWord.slice(0, -1); // Remove trailing dot
+        
+        console.log('[COMPLETION] ALIAS.COLUMN FORMAT DETECTED:', {
+            fullDotFormat: effectiveCurrentWord,
+            detectedAlias: aliasName,
+            hasMatchingTable: !!aliasToTableName[aliasName],
+            tableNameIfMatches: aliasToTableName[aliasName],
+            currentClauseBeforeOverride: currentClause
+        });
+        
+        // Force SELECT-only mode if we have a matching alias for that table
+        if (aliasName && aliasToTableName[aliasName]) {
+            console.log('[COMPLETION] OVERRIDING clause analysis → FORCE COLUMN SUGGESTIONS');
+            isInsideSelectOnly = true;
+            currentClause = null;  // Treat as SELECT-only to trigger column suggestions
+        } else if (!aliasName) {
+            console.warn('[Completion] Alias "." detected but no alias name found');
+        } else {
+            console.warn('[Completion] Alias "." detected but no matching table found:', aliasName);
+        }
+    }
 
-    // 5. FROM 절에서 테이블이 실제로 추출되었는지 확인
+    // Debug logging - dedicated module delegation (analysis uses full query)  
+    logNestedContext(currentQuery, currentClause, lastFromIdx, aliasToTableName);
+    
+    // Use scopeStack depth as truth for nested query detection - NO separate calculation!
+    const isNestedQuery = activeScopeDepth > 0;
     const hasValidTableInFROM = Object.keys(aliasToTableName).length > 0;
     
     let targetTableName: string | null = null;	    let targetTableNames: string[] = [];
 
     let partialNameFromInput: string | null = null;
-    let isInsideSelectOnly = false;
-    let isDotFormatWithoutTrailingDot: boolean = false;  //  "A<P>" 패턴 (A.P 에서 P 입력 중)
+    let isDotFormatWithoutTrailingDot: boolean = false;  // "A<P>" 패턴 (A.P 에서 P 입력 중)
 
     if (currentClause === 'FROM') {
         isInsideSelectOnly = true;
         
-        // Nested query 처리: 현재 SELECT 범위만 파싱
+        // Nested query 처리: 현재 섹션만 파싱 - activeScope 의 FROM 절 범위 사용
         let textToParse = textBeforeCursor;
-        if (isNestedQuery && currentSelectInfo) {
-            console.log('[COMPLETION] Nested FROM 절 감지! current select 영역만 파싱...');
-            textToParse = textBeforeCursor.substring(currentSelectInfo.pos);
-        }
-
+        // TODO: Implement proper scoped parsing using activeScope boundaries
+        
         const result = extractTableFromFROMClause(textToParse, tableColumns);
         targetTableName = result.targetTableName;
         partialNameFromInput = result.partialNameFromInput;

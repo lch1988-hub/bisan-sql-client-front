@@ -7,10 +7,63 @@ export interface AliasMapping {
 }
 
 /**
+ * WITH 절에서 CTE 정의 추출
+ * 예: "WITH cte1 AS (SELECT * FROM X), cte2 AS (...)" -> {cte1: "(CTE:cte1)", cte2: "(CTE:cte2)"}
+ */
+export function parseCteDefinitions(sql: string): AliasMapping {
+    const cteAliases: Record<string, string> = {};
+    
+    // WITH 절 시작 찾기 (SELECT 이전)
+    const withMatch = sql.match(/\bWITH\s+([\s\S]+?)(?:\s+SELECT\b)/i);
+    if (!withMatch?.[1]) return cteAliases;
+    
+    const cteSegment = withMatch[1];  // "cte1 AS (SELECT...), cte2 AS (...)"
+    
+    // 각 CTE 정의 추출 - 컴마 구분이지만 괄호 네스팅을 존중
+    let parenDepth = 0;
+    let currentCte = '';
+    
+    for (let i = 0; i < cteSegment.length; i++) {
+        const char = cteSegment[i];
+        if (char === '(') parenDepth++;
+        else if (char === ')') parenDepth--;
+        
+        if (char === ',' && parenDepth === 0) {
+            // End of CTE definition
+            const trimmedCte = currentCte.trim();
+            const nameMatch = trimmedCte.match(/^(\w+)\s+AS\s*\(/i);
+            if (nameMatch?.[1]) {
+                const cteName = nameMatch[1].toUpperCase();
+                cteAliases[cteName] = `(CTE:${cteName})`;  // CTE 임을 표시
+                console.log('[parseCteDefinitions] Registered CTE as virtual table:', cteName);
+            }
+            currentCte = '';
+        } else {
+            currentCte += char;
+        }
+    }
+    
+    // 마지막 CTE ( trailing comma 없음)
+    const trimmedCte = currentCte.trim();
+    const nameMatch = trimmedCte.match(/^(\w+)\s+AS\s*\(/i);
+    if (nameMatch?.[1]) {
+        const cteName = nameMatch[1].toUpperCase();
+        cteAliases[cteName] = `(CTE:${cteName})`;
+        console.log('[parseCteDefinitions] Registered CTE as virtual table:', cteName);
+    }
+    
+    return cteAliases;
+}
+
+/**
  * FROM 절에서 테이블명과 alias 추출 (전체 쿼리 텍스트 사용)
  */
 export function extractFromClause(sql: string): AliasMapping {
     const aliasToTableName: Record<string, string> = {};
+    
+    // NEW: WITH 절 먼저 파싱하여 CTE 이름 추출
+    const cteMap = parseCteDefinitions(sql);
+    Object.assign(aliasToTableName, cteMap);  // CTE 를 가상 테이블로 추가
     
     try {
         //FROM 절 전체 추출 (다음 키워드까지 또는 엔드)  

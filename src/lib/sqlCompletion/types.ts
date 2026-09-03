@@ -13,6 +13,12 @@ export interface CompletionContext {
     cursorOffsetInQuery: number;
 }
 
+export interface CteDefinition {
+    name: string;
+    position: number;  // WITH 절 내 위치
+    querySegment?: string;  // AS (...) 부분 (선택적)
+}
+
 export interface ParsingResult {
     currentClause: string | null;
     lastSelectIdx: number;
@@ -20,6 +26,8 @@ export interface ParsingResult {
     lastWhereIdx: number;
     lastGroupByIdx: number;
     lastOrderByIdx: number;
+    lastHavingIdx?: number;  // NEW: for HAVING clause tracking
+    cteDefinitions?: CteDefinition[];  // NEW: CTE 목록 (WITH 절에서 추출)
 }
 
 export interface TableExtractResult {

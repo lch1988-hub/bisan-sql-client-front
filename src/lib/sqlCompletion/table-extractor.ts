@@ -71,12 +71,22 @@ export function extractTableFromFROMClause(
         const exactMatch = allMatches.find((key: string) => key === partialName);
         const targetTableName = exactMatch || allMatches[0];
 
-        console.log('[DEBUG]  Enhanced', partialName, '', targetTableName);
+        console.log('[DEBUG] ✓ Enhanced', partialName, '→', targetTableName);
         return {
             targetTableName,
             partialNameFromInput: partialName
         };
     } else {
+        // NEW: 메타데이터에서 찾을 수 없다면 CTE 이름 확인
+        const isCtePattern = /^\(CTE:\w+\)$/.test(partialName);
+        if (isCtePattern) {
+            console.log('[DEBUG] ✓ Matched CTE:', partialName);
+            return {
+                targetTableName: partialName,
+                partialNameFromInput: null  // CTE 는 입력 완료 상태로 간주
+            };
+        }
+        
         // 매칭되는 테이블 없음  
         console.log(' No matching tables for:', partialName);
         return {
@@ -87,7 +97,7 @@ export function extractTableFromFROMClause(
 }
 
 /**
- * SELECT 절 이후 (FROM 이전) 에서-table명/alias 추출  
+ * SELECT 절 이후 (FROM 이전) 에서 -table 명/alias 추출  
  */
 export function extractTableFromSelectOnly(
     aliasToTableName: Record<string, string>,
@@ -118,8 +128,8 @@ export function extractTableFromSelectOnly(
         
         const targetTableName = exactMatch || allMatches[0];
         
-        console.log('[DEBUG]  Selected:', targetTableName);
-        console.log('[DEBUG]  Metadata check:', { 
+        console.log('[DEBUG] ✓ Selected:', targetTableName);
+        console.log('[DEBUG]   Metadata check:', { 
             exists: !!tableColumns?.[targetTableName],  
             columnCount: tableColumns?.[targetTableName]?.length || 0  
         });
@@ -129,6 +139,15 @@ export function extractTableFromSelectOnly(
             partialNameFromInput: potentialTable?.toUpperCase() || null 
         };
     } else {
+        // NEW: CTE 이름 확인 (가상 테이블)
+        if (potentialTable && /^\(CTE:\w+\)$/.test(potentialTable)) {
+            console.log('[DEBUG] ✓ Matched CTE:', potentialTable);
+            return { 
+                targetTableName: potentialTable, 
+                partialNameFromInput: null 
+            };
+        }
+        
         console.warn('No matching tables for', potentialTable);
         return { targetTableName: null, partialNameFromInput: null };
     }
