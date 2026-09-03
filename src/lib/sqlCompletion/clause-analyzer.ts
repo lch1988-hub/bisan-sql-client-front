@@ -68,8 +68,12 @@ export interface KeywordWithContextInfo {
     groupByPos: number;
     orderByPos: number;
     havingPos: number;  // NEW: HAVING 절 추가
-    withPos: number;  // NEW: WITH 키워드 위치
+    withPos: number;  // NEW: WITH keyword 위치
     lastOnPos: number;  // NEW: 마지막 ON 키워드 위치 (JOIN ... ON)
+    pivotPos: number;   // NEW: PIVOT keyword 위치
+    unpivotPos: number; // NEW: UNPIVOT keyword 위치
+    startWithPos: number;  // NEW: START WITH keyword 위치
+    connectByPos: number;  // NEW: CONNECT BY keyword 위치
     cteDefinitions: CteDefinition[];  // NEW: 추출된 CTE 목록
     currentDepth: number;           // 커서 위치의 parentheses 깊이
     lastSelectDepth: number;       // 마지막 SELECT 의 깊이
@@ -78,9 +82,14 @@ export interface KeywordWithContextInfo {
     lastGroupByDepth: number;      // 마지막 GROUP BY 의 깊이
     lastOrderByDepth: number;      // 마지막 ORDER BY 의 깊이
     lastHavingDepth: number;       // NEW: 마지막 HAVING 의 깊이
-    lastWithDepth: number;         // NEW: 마지막 WITH 의 깊이
+    lastWithDepth: number;         // NEW: 마지막 WITH の 깊이
     lastOnDepth: number;           // NEW: 마지막 ON 의 깊이
+    lastPivotDepth: number;        // NEW: PIVOT 의 깊이
+    lastUnpivotDepth: number;      // NEW: UNPIVOT 의 깊이
+    lastStartWithDepth: number;    // NEW: START WITH 의 깊이
+    lastConnectByDepth: number;    // NEW: CONNECT BY 의 깊이
 }
+
 
 /**
  * 텍스트 전역에서 모든 키워드 위치와 해당 parentheses 깊이 기록
@@ -95,6 +104,8 @@ export function findKeywordsWithContext(text: string): KeywordWithContextInfo {
     let lastSelectDepth = -1, lastFromDepth = -1, lastWhereDepth = -1, lastGroupByDepth = -1, lastOrderByDepth = -1, lastHavingDepth = -1;
     let withPos = -1, lastWithDepth = -1;
     let lastOnPos = -1, lastOnDepth = -1;  // NEW: ON 키워드 추적 추가
+    let pivotPos = -1, unpivotPos = -1, startWithPos = -1, connectByPos = -1;  // Oracle keywords
+    let lastPivotDepth = -1, lastUnpivotDepth = -1, lastStartWithDepth = -1, lastConnectByDepth = -1;
     let cteDefinitions: CteDefinition[] = [];
     let currentDepth = 0;
 
@@ -102,19 +113,19 @@ export function findKeywordsWithContext(text: string): KeywordWithContextInfo {
     const extractCteDefinitions = (text: string, startFrom: number): void => {
         const withSegment = text.substring(startFrom);
         const withMatch = withSegment.match(/^\s*WITH\s+([\s\S]+?)(?:\s+SELECT\b)/i);
-        
+
         if (!withMatch?.[1]) return;
-        
+
         const cteSegment = withMatch[1];
         // Split by comma but respect parentheses nesting
         let parenDepth = 0;
         let currentCte = '';
-        
+
         for (let i = 0; i < cteSegment.length; i++) {
             const char = cteSegment[i];
             if (char === '(') parenDepth++;
             else if (char === ')') parenDepth--;
-            
+
             if (char === ',' && parenDepth === 0) {
                 // End of CTE definition
                 const trimmedCte = currentCte.trim();
@@ -130,7 +141,7 @@ export function findKeywordsWithContext(text: string): KeywordWithContextInfo {
                 currentCte += char;
             }
         }
-        
+
         // Last CTE (no trailing comma)
         const trimmedCte = currentCte.trim();
         const nameMatch = trimmedCte.match(/^(\w+)\s+AS\s*\(/i);
@@ -207,17 +218,40 @@ export function findKeywordsWithContext(text: string): KeywordWithContextInfo {
             if (keywordMatch) {
                 i += keywordMatch[0].length - 1;
             }
-        } else if (/^(?:\s|[\r\n])*ON(?=\s|[\r\n]|$)/i.test(remainingText)) {
-            // NEW: ON 키워드 추적 추가 (JOIN ... ON)
-            lastOnPos = i;
-            lastOnDepth = currentDepth;
-            const keywordMatch = remainingText.match(/^(?:\s)*ON/i);
-            if (keywordMatch) {
-                i += keywordMatch[0].length - 1;
+        } else if (/^(?:\s|[\r\n])*PIVOT(?=\s|[\r\n]|$)/i.test(remainingText)) {
+            // Oracle: PIVOT keyword (NEW)
+            pivotPos = i;
+            lastPivotDepth = currentDepth;
+            const keywordMatch301 = remainingText.match(/^(?:\s)*PIVOT/i);
+            if (keywordMatch301) {
+                i += keywordMatch301[0].length - 1;
+            }
+        } else if (/^(?:\s|[\r\n])*UNPIVOT(?=\s|[\r\n]|$)/i.test(remainingText)) {
+            // Oracle: UNPIVOT keyword (NEW)
+            unpivotPos = i;
+            lastUnpivotDepth = currentDepth;
+            const keywordMatch302 = remainingText.match(/^(?:\s)*UNPIVOT/i);
+            if (keywordMatch302) {
+                i += keywordMatch302[0].length - 1;
+            }
+        } else if (/^(?:\s|[\r\n])*START\s+WITH(?=\s|[\r\n]|$)/i.test(remainingText)) {
+            // Oracle: START WITH keyword (NEW)
+            startWithPos = i;
+            lastStartWithDepth = currentDepth;
+            const keywordMatch303 = remainingText.match(/^(?:\s)*START\s+WITH/i);
+            if (keywordMatch303) {
+                i += keywordMatch303[0].length - 1;
+            }
+        } else if (/^(?:\s|[\r\n])*CONNECT\s+BY(?=\s|[\r\n]|$)/i.test(remainingText)) {
+            // Oracle: CONNECT BY keyword (NEW)
+            connectByPos = i;
+            lastConnectByDepth = currentDepth;
+            const keywordMatch304 = remainingText.match(/^(?:\s)*CONNECT\s+BY/i);
+            if (keywordMatch304) {
+                i += keywordMatch304[0].length - 1;
             }
         }
     }
-
     // 마지막 깊이가 현재 커서의 깊이 (정규화된 텍스트 사용)
     currentDepth = 0;
     for (let i = 0; i < normalizedText.length; i++) {
@@ -226,8 +260,10 @@ export function findKeywordsWithContext(text: string): KeywordWithContextInfo {
     }
 
     return {
-        selectPos, fromPos, wherePos, groupByPos, orderByPos, havingPos, withPos, lastOnPos, cteDefinitions,  // NEW: lastOnPos 추가
-        currentDepth, lastSelectDepth, lastFromDepth, lastWhereDepth, lastGroupByDepth, lastOrderByDepth, lastHavingDepth, lastWithDepth, lastOnDepth  // NEW: lastOnDepth 추가
+        selectPos, fromPos, wherePos, groupByPos, orderByPos, havingPos, withPos, lastOnPos, cteDefinitions,
+        pivotPos, unpivotPos, startWithPos, connectByPos,
+        currentDepth, lastSelectDepth, lastFromDepth, lastWhereDepth, lastGroupByDepth, lastOrderByDepth, lastHavingDepth, 
+        lastWithDepth, lastOnDepth, lastPivotDepth, lastUnpivotDepth, lastStartWithDepth, lastConnectByDepth
     };
 }
 
