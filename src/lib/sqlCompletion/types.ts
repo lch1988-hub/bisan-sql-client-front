@@ -27,6 +27,8 @@ export interface ParsingResult {
     lastGroupByIdx: number;
     lastOrderByIdx: number;
     lastHavingIdx?: number;  // NEW: for HAVING clause tracking
+    lastConnectByIdx?: number;  // Oracle CONNECT BY 위치
+    lastStartWithIdx?: number;  // Oracle START WITH 위치
     cteDefinitions?: CteDefinition[];  // NEW: CTE 목록 (WITH 절에서 추출)
 }
 

@@ -93,7 +93,7 @@ export function createCompletionSuggestions(
         if (textBeforeCursorActual.trimEnd().endsWith('.') && 
             textBeforeCursorActual.trimEnd().length > 0) {
             const lastSpaceIdx = textBeforeCursorActual.lastIndexOf(' ');
-            const potentialAlias = textBeforeCursorActual.substring(lastSpaceIdx + 1).trim();
+            const potentialAlias = textBeforeCursorActual.substring(lastSpaceIdx + 1).trim().replace(/\.+$/, '');
             
             console.log('[Completion] DETECTED DOT FORMAT (ACTUAL MONACO):', {
                 alias: potentialAlias,
@@ -235,6 +235,30 @@ export function createCompletionSuggestions(
                     clauseAnalyzerReturned: currentClause,
                     activeScopeDepth,
                     scopeClauses: activeScopeClauses.map((c: any) => c.type).join(', ')
+                });
+                currentClause = null;  // Force SELECT-only mode
+            }
+        }
+    }
+    
+    // CRITICAL FIX #J1: Enhanced nested query check - direct text analysis fallback
+    // If scopeStack didn't detect activeScope but we clearly have a subquery before cursor, override anyway
+    if (currentClause === 'FROM' && currentQuery.substring(0, cursorOffsetFinal).includes('(')) {
+        const lastOpeningParen = currentQuery.lastIndexOf('(', cursorOffsetFinal - 1);
+        
+        // Check if there's SELECT inside the paren but no FROM yet
+        if (lastOpeningParen >= 0) {
+            const textInsideParenth = currentQuery.substring(lastOpeningParen + 1, cursorOffsetFinal);
+            
+            // Simple check: SELECT exists, FROM doesn't exist after SELECT at this position
+            const hasSelectButNoFromAfterSelect = /\bSELECT\b/i.test(textInsideParenth) && 
+                                                   !/\s+FROM\s|\nFROM\s/i.test(textInsideParenth);
+            
+            if (hasSelectButNoFromAfterSelect) {
+                console.log('[COMPLETION] OVERRIDING FROM → SELECT (direct nested check):', {
+                    textInsideParen: textInsideParenth.trim(),
+                    lastOpeningParen,
+                    cursorOffsetFinal
                 });
                 currentClause = null;  // Force SELECT-only mode
             }

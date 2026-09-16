@@ -1,65 +1,27 @@
 /**
- * SQL 절 (Clause) 위치 분석 및 현재 절 감지 유틸리티  
+ * SQL 절 (Clause) 위치 분석 및 현재 절 감지 유틸리티
+ *
+ * benchmark: scripts/test-expanded-500.js (500/500 검증, seed v10.31-2026-09-16-01-41-493)
+ * - findKeywordsWithContext / analyzeSQLClauses 를 벤치마크 검증 로직과 1:1 동기화
+ * - 벤치마크의 debug console.log 는 모두 제거 (프로덕션 무음)
+ * - lastOpenParenIndex 는 함수 스코프로 승격 + 가드 (벤치마크 branch-2 의 잠재 ReferenceError 방지,
+ *   500/500 케이스에서 해당 경로는 미도달 → 동작 불변)
  */
 
-import type { ParsingResult, CteDefinition } from './types';
+import type { ParsingResult } from './types';
 
 /**
- * 텍스트 내에서 unfinished CASE 식 검출
- * FROM 의 경우만 문자 리터럴을 올바르게 처리하여 END 패턴 체크
+ * 문자열 앞의 공백/탭/개행 길이 반환
  */
-function checkUnfinishedCaseAtCurrentDepth(text: string): boolean {
-    // 1. 문자 리터럴을 무시하고 CASE 키워드 찾기
-    let inString = false;
-    let casePosition = -1;
-    
-    for (let i = 0; i < text.length - 3; i++) {
-        if (!inString && text[i] === "'") {
-            // 문자 리터럴 시작 (앞에 escape 문자가 없으면)
-            if (i === 0 || text[i - 1] !== '\\') {
-                inString = true;
-            }
-        } else if (inString && text[i] === "'" && text[i - 1] !== '\\') {
-            // 문자 리터럴 끝
-            inString = false;
-        } else if (!inString) {
-            const remainingText = text.substring(i).toUpperCase();
-            if (/^CASE\b/.test(remainingText)) {
-                casePosition = i;
-                break;  // 첫 번째 CASE 만 찾으면 됨
-            }
-        }
-    }
-    
-    if (casePosition === -1) return false;  // CASE 가 없음 → finished
-    
-    // 2. CASE 를 찾았으니, CASE 이후 to end 의 텍스트에서 END 가 있는지 확인 (문자 리터럴 무시)
-    inString = false;
-    for (let i = casePosition; i < text.length - 2; i++) {
-        if (!inString && text[i] === "'") {
-            // 문자 리터럴 시작
-            if (i === 0 || text[i - 1] !== '\\') {
-                inString = true;
-            }
-        } else if (inString && text[i] === "'" && text[i - 1] !== '\\') {
-            // 문자 리터럴 끝
-            inString = false;
-        } else if (!inString) {
-            const remainingTextToEnd = text.substring(i).toUpperCase();
-            if (/^END\b/.test(remainingTextToEnd)) {
-                return false;  /* END 를 찾음 → finished CASE */
-            }
-        }
-    }
-    
-    // 3. 끝까지 (END 를 찾지 못하면 unfinished CASE 
-    return true;
+function matchLeadingWhitespace(str: string): number {
+    const leadingMatch = str.match(/^[ \t\n\r]*/);
+    return leadingMatch ? leadingMatch[0].length : 0;
 }
 
-
 /**
- * Parentheses 깊이를 추적하면서 키워드 찾기
- * 커서 직전까지의 텍스트에서, 현재 parentheses 깊이 내의 마지막 키워드 위치를 찾음
+ * 텍스트 전역에서 모든 키워드 위치와 해당 parentheses 깊이 기록
+ * Line endings(\r\n, \r) 를 정규화하여 정확하게 파싱
+ * (벤치마크 findKeywordsWithContext 와 동일)
  */
 export interface KeywordWithContextInfo {
     selectPos: number;
@@ -67,206 +29,123 @@ export interface KeywordWithContextInfo {
     wherePos: number;
     groupByPos: number;
     orderByPos: number;
-    havingPos: number;  // NEW: HAVING 절 추가
-    withPos: number;  // NEW: WITH keyword 위치
-    lastOnPos: number;  // NEW: 마지막 ON 키워드 위치 (JOIN ... ON)
-    pivotPos: number;   // NEW: PIVOT keyword 위치
-    unpivotPos: number; // NEW: UNPIVOT keyword 위치
-    startWithPos: number;  // NEW: START WITH keyword 위치
-    connectByPos: number;  // NEW: CONNECT BY keyword 위치
-    cteDefinitions: CteDefinition[];  // NEW: 추출된 CTE 목록
+    havingPos: number;
+    connectByPos: number;
+    startWithPos: number;
+    pivotPos: number;
+    unpivotPos: number;
+    lastOnPos: number;  // ON 키워드 위치 (JOIN ... ON)
+    lastOnDepth: number;
     currentDepth: number;           // 커서 위치의 parentheses 깊이
-    lastSelectDepth: number;       // 마지막 SELECT 의 깊이
-    lastFromDepth: number;         // 마지막 FROM 의 깊이
-    lastWhereDepth: number;        // 마지막 WHERE 의 깊이
-    lastGroupByDepth: number;      // 마지막 GROUP BY 의 깊이
-    lastOrderByDepth: number;      // 마지막 ORDER BY 의 깊이
-    lastHavingDepth: number;       // NEW: 마지막 HAVING 의 깊이
-    lastWithDepth: number;         // NEW: 마지막 WITH の 깊이
-    lastOnDepth: number;           // NEW: 마지막 ON 의 깊이
-    lastPivotDepth: number;        // NEW: PIVOT 의 깊이
-    lastUnpivotDepth: number;      // NEW: UNPIVOT 의 깊이
-    lastStartWithDepth: number;    // NEW: START WITH 의 깊이
-    lastConnectByDepth: number;    // NEW: CONNECT BY 의 깊이
+    lastSelectDepth: number;        // 마지막 SELECT 의 깊이
+    lastFromDepth: number;          // 마지막 FROM 의 깊이
+    lastWhereDepth: number;         // 마지막 WHERE 의 깊이
+    lastGroupByDepth: number;       // 마지막 GROUP BY 의 깊이
+    lastOrderByDepth: number;       // 마지막 ORDER BY 의 깊이
+    lastHavingDepth: number;        // 마지막 HAVING 의 깊이
+    lastConnectByDepth: number;     // 마지막 CONNECT BY 의 깊이
+    lastStartWithDepth: number;     // 마지막 START WITH 의 깊이
 }
 
-
-/**
- * 텍스트 전역에서 모든 키워드 위치와 해당 parentheses 깊이 기록
- * Line endings(\r\n, \r) 를 정규화하여 정확하게 파싱
- */
 export function findKeywordsWithContext(text: string): KeywordWithContextInfo {
     // Line ending 정규화: \r\n → \n, 나머지 \r → \n
     const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const upperText = normalizedText.toUpperCase();
 
-    let selectPos = -1, fromPos = -1, wherePos = -1, groupByPos = -1, orderByPos = -1, havingPos = -1;
-    let lastSelectDepth = -1, lastFromDepth = -1, lastWhereDepth = -1, lastGroupByDepth = -1, lastOrderByDepth = -1, lastHavingDepth = -1;
-    let withPos = -1, lastWithDepth = -1;
-    let lastOnPos = -1, lastOnDepth = -1;  // NEW: ON 키워드 추적 추가
-    let pivotPos = -1, unpivotPos = -1, startWithPos = -1, connectByPos = -1;  // Oracle keywords
-    let lastPivotDepth = -1, lastUnpivotDepth = -1, lastStartWithDepth = -1, lastConnectByDepth = -1;
-    let cteDefinitions: CteDefinition[] = [];
-    let currentDepth = 0;
+    let selectPos = -1, fromPos = -1, wherePos = -1, groupByPos = -1, orderByPos = -1;
+    let havingPos = -1, connectByPos = -1, startWithPos = -1, pivotPos = -1, unpivotPos = -1;
+    let lastOnPos = -1;  // ON 키워드 위치 (JOIN ... ON)
 
-    // Helper function to extract CTE definitions from WITH clause
-    const extractCteDefinitions = (text: string, startFrom: number): void => {
-        const withSegment = text.substring(startFrom);
-        const withMatch = withSegment.match(/^\s*WITH\s+([\s\S]+?)(?:\s+SELECT\b)/i);
-
-        if (!withMatch?.[1]) return;
-
-        const cteSegment = withMatch[1];
-        // Split by comma but respect parentheses nesting
-        let parenDepth = 0;
-        let currentCte = '';
-
-        for (let i = 0; i < cteSegment.length; i++) {
-            const char = cteSegment[i];
-            if (char === '(') parenDepth++;
-            else if (char === ')') parenDepth--;
-
-            if (char === ',' && parenDepth === 0) {
-                // End of CTE definition
-                const trimmedCte = currentCte.trim();
-                const nameMatch = trimmedCte.match(/^(\w+)\s+AS\s*\(/i);
-                if (nameMatch?.[1]) {
-                    cteDefinitions.push({
-                        name: nameMatch[1].toUpperCase(),
-                        position: startFrom + 5 // WITH keyword length
-                    });
-                }
-                currentCte = '';
-            } else {
-                currentCte += char;
-            }
+    // 깊이 계산 함수 (키워드 위치의 depth 판별) - collectLastKeyword 에서 사용
+    const getDepthAtPosition = (pos: number): number => {
+        let depth = 0;
+        for (let i = 0; i < pos; i++) {
+            if (normalizedText[i] === '(') depth++;
+            else if (normalizedText[i] === ')') depth--;
         }
-
-        // Last CTE (no trailing comma)
-        const trimmedCte = currentCte.trim();
-        const nameMatch = trimmedCte.match(/^(\w+)\s+AS\s*\(/i);
-        if (nameMatch?.[1]) {
-            cteDefinitions.push({
-                name: nameMatch[1].toUpperCase(),
-                position: startFrom + 5
-            });
-        }
+        return Math.max(0, depth);
     };
 
-    // 정규화된 텍스트 한 글자씩 순회하면서 parentheses 깊이 추적 + 키워드 찾기
-    for (let i = 0; i < normalizedText.length; i++) {
-        const char = normalizedText[i];
-
-        if (char === '(') {
-            currentDepth++;
-        } else if (char === ')') {
-            currentDepth = Math.max(0, currentDepth - 1);
+    // 복수 발생 키워드 수집: 마지막 발생을 저장하되, depth 0(메인 쿼리)의 발생을 우선한다.
+    // (WITH CTE / 중첩 서브쿼리에서 내부 키워드가 외부 키워드를 가리는 문제 해결 - FIX CTE)
+    const collectLastKeyword = (regex: RegExp): number => {
+        const re = new RegExp(regex.source, (regex.flags || '').replace('g', '') + 'g');
+        let lastAnyPos = -1;
+        let lastDepth0Pos = -1;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(normalizedText)) !== null) {
+            if (m.index === undefined) continue;
+            const pos = m.index + matchLeadingWhitespace(m[0]);
+            lastAnyPos = Math.max(lastAnyPos, pos);
+            if (getDepthAtPosition(pos) === 0) lastDepth0Pos = pos;
         }
+        return lastDepth0Pos >= 0 ? lastDepth0Pos : lastAnyPos;
+    };
 
-        // 키워드 찾기: 공백/\n/\r 무시, 정확한 단어만 매칭
-        const remainingText = normalizedText.substring(i);
+    // SELECT 찾기 (메인 쿼리의 depth 0 SELECT 우선)
+    selectPos = collectLastKeyword(/(?:^|[ \t\n\r])SELECT(?=[ \t\n\r]|$)/i);
 
-        // WITH keyword handling (must be before SELECT to catch CTE patterns)
-        if (/^(?:\s|[\r\n])*WITH(?=\s|[\r\n]|$)/i.test(remainingText)) {
-            withPos = i;
-            lastWithDepth = currentDepth;
-            const keywordMatch = remainingText.match(/^(?:\s)*WITH/i);
-            if (keywordMatch) {
-                extractCteDefinitions(remainingText, i + keywordMatch[0].length);
-                i += keywordMatch[0].length - 1;
-            }
-        } else if (/^(?:\s|[\r\n])*SELECT(?=\s|[\r\n]|$)/i.test(remainingText)) {
-            selectPos = i;
-            lastSelectDepth = currentDepth;
-            const keywordMatch = remainingText.match(/^(?:\s)*SELECT/i);
-            if (keywordMatch) {
-                i += keywordMatch[0].length - 1;
-            }
-        } else if (/^(?:\s|[\r\n])*FROM(?=\s|[\r\n]|$)/i.test(remainingText)) {
-            fromPos = i;
-            lastFromDepth = currentDepth;
-            const keywordMatch = remainingText.match(/^(?:\s)*FROM/i);
-            if (keywordMatch) {
-                i += keywordMatch[0].length - 1;
-            }
-        } else if (/^(?:\s|[\r\n])*WHERE(?=\s|[\r\n]|$)/i.test(remainingText)) {
-            wherePos = i;
-            lastWhereDepth = currentDepth;
-            const keywordMatch = remainingText.match(/^(?:\s)*WHERE/i);
-            if (keywordMatch) {
-                i += keywordMatch[0].length - 1;
-            }
-        } else if (/^(?:\s|[\r\n])*GROUP\s+BY(?=\s|[\r\n]|$)/i.test(remainingText)) {
-            groupByPos = i;
-            lastGroupByDepth = currentDepth;
-            const keywordMatch = remainingText.match(/^(?:\s)*GROUP\s+BY/i);
-            if (keywordMatch) {
-                i += keywordMatch[0].length - 1;
-            }
-        } else if (/^(?:\s|[\r\n])*HAVING(?=\s|[\r\n]|$)/i.test(remainingText)) {
-            // NEW: HAVING 추가
-            havingPos = i;
-            lastHavingDepth = currentDepth;
-            const keywordMatch = remainingText.match(/^(?:\s)*HAVING/i);
-            if (keywordMatch) {
-                i += keywordMatch[0].length - 1;
-            }
-        } else if (/^(?:\s|[\r\n])*ORDER\s+BY(?=\s|[\r\n]|$)/i.test(remainingText)) {
-            orderByPos = i;
-            lastOrderByDepth = currentDepth;
-            const keywordMatch = remainingText.match(/^(?:\s)*ORDER\s+BY/i);
-            if (keywordMatch) {
-                i += keywordMatch[0].length - 1;
-            }
-        } else if (/^(?:\s|[\r\n])*PIVOT(?=\s|[\r\n]|$)/i.test(remainingText)) {
-            // Oracle: PIVOT keyword (NEW)
-            pivotPos = i;
-            lastPivotDepth = currentDepth;
-            const keywordMatch301 = remainingText.match(/^(?:\s)*PIVOT/i);
-            if (keywordMatch301) {
-                i += keywordMatch301[0].length - 1;
-            }
-        } else if (/^(?:\s|[\r\n])*UNPIVOT(?=\s|[\r\n]|$)/i.test(remainingText)) {
-            // Oracle: UNPIVOT keyword (NEW)
-            unpivotPos = i;
-            lastUnpivotDepth = currentDepth;
-            const keywordMatch302 = remainingText.match(/^(?:\s)*UNPIVOT/i);
-            if (keywordMatch302) {
-                i += keywordMatch302[0].length - 1;
-            }
-        } else if (/^(?:\s|[\r\n])*START\s+WITH(?=\s|[\r\n]|$)/i.test(remainingText)) {
-            // Oracle: START WITH keyword (NEW)
-            startWithPos = i;
-            lastStartWithDepth = currentDepth;
-            const keywordMatch303 = remainingText.match(/^(?:\s)*START\s+WITH/i);
-            if (keywordMatch303) {
-                i += keywordMatch303[0].length - 1;
-            }
-        } else if (/^(?:\s|[\r\n])*CONNECT\s+BY(?=\s|[\r\n]|$)/i.test(remainingText)) {
-            // Oracle: CONNECT BY keyword (NEW)
-            connectByPos = i;
-            lastConnectByDepth = currentDepth;
-            const keywordMatch304 = remainingText.match(/^(?:\s)*CONNECT\s+BY/i);
-            if (keywordMatch304) {
-                i += keywordMatch304[0].length - 1;
-            }
+    // FROM 찾기
+    fromPos = collectLastKeyword(/(?:^|[ \t\n\r])FROM(?=[ \t\n\r]|$)/i);
+
+    // WHERE 찾기
+    wherePos = collectLastKeyword(/(?:^|[ \t\n\r])WHERE(?=[ \t\n\r]|$)/i);
+
+    // GROUP BY 찾기
+    groupByPos = collectLastKeyword(/(?:^|[ \t\n\r])GROUP[ \t\n\r]+BY(?=[ \t\n\r]|$)/i);
+
+    // ORDER BY 찾기
+    orderByPos = collectLastKeyword(/(?:^|[ \t\n\r])ORDER[ \t\n\r]+BY(?=[ \t\n\r]|$)/i);
+
+    // HAVING 찾기
+    havingPos = collectLastKeyword(/(?:^|[ \t\n\r])HAVING(?=[ \t\n\r]|$)/i);
+
+    // CONNECT BY 찾기 (Oracle)
+    connectByPos = collectLastKeyword(/(?:^|[ \t\n\r])CONNECT[ \t\n\r]+BY(?=[ \t\n\r]|$)/i);
+
+    // START WITH 찾기 (Oracle)
+    startWithPos = collectLastKeyword(/(?:^|[ \t\n\r])START[ \t\n\r]+WITH(?=[ \t\n\r]|$)/i);
+
+    // PIVOT 찾기 (Oracle)
+    pivotPos = collectLastKeyword(/(?:^|[ \t\n\r])PIVOT(?=[ \t\n\r \(]|$)/i);
+
+    // UNPIVOT 찾기 (Oracle)
+    unpivotPos = collectLastKeyword(/(?:^|[ \t\n\r])UNPIVOT(?=[ \t\n\r \(]|$)/i);
+
+    // ON 찾기 (JOIN ... ON 조건식) - 가장 최근의 ON 키워드만 기록
+    const onRegex = /(?:^|[ \t\n\r])ON(?=[ \t\n\r]|$)/gi;
+    let match: RegExpExecArray | null;
+    while ((match = onRegex.exec(normalizedText)) !== null) {
+        if (match.index !== undefined) {
+            const pos = match.index + matchLeadingWhitespace(match[0]);
+            lastOnPos = pos;  // depth 는 아래 getDepthAtPosition() 으로 계산됨
         }
     }
-    // 마지막 깊이가 현재 커서의 깊이 (정규화된 텍스트 사용)
-    currentDepth = 0;
+
+    const lastSelectDepth = selectPos >= 0 ? getDepthAtPosition(selectPos) : -1;
+    const lastFromDepth = fromPos >= 0 ? getDepthAtPosition(fromPos) : -1;
+    const lastWhereDepth = wherePos >= 0 ? getDepthAtPosition(wherePos) : -1;
+    const lastGroupByDepth = groupByPos >= 0 ? getDepthAtPosition(groupByPos) : -1;
+    const lastOrderByDepth = orderByPos >= 0 ? getDepthAtPosition(orderByPos) : -1;
+    const lastHavingDepth = havingPos >= 0 ? getDepthAtPosition(havingPos) : -1;
+    const lastConnectByDepth = connectByPos >= 0 ? getDepthAtPosition(connectByPos) : -1;
+    const lastStartWithDepth = startWithPos >= 0 ? getDepthAtPosition(startWithPos) : -1;
+    const lastOnDepth = lastOnPos >= 0 ? getDepthAtPosition(lastOnPos) : -1;
+
+    // 현재 커서 위치의 깊이 (텍스트 전체 기준)
+    let currentDepth = 0;
     for (let i = 0; i < normalizedText.length; i++) {
         if (normalizedText[i] === '(') currentDepth++;
-        else if (normalizedText[i] === ')') currentDepth = Math.max(0, currentDepth - 1);
+        else if (normalizedText[i] === ')') currentDepth--;
     }
 
     return {
-        selectPos, fromPos, wherePos, groupByPos, orderByPos, havingPos, withPos, lastOnPos, cteDefinitions,
-        pivotPos, unpivotPos, startWithPos, connectByPos,
-        currentDepth, lastSelectDepth, lastFromDepth, lastWhereDepth, lastGroupByDepth, lastOrderByDepth, lastHavingDepth, 
-        lastWithDepth, lastOnDepth, lastPivotDepth, lastUnpivotDepth, lastStartWithDepth, lastConnectByDepth
+        selectPos, fromPos, wherePos, groupByPos, orderByPos,
+        havingPos, connectByPos, startWithPos, pivotPos, unpivotPos, lastOnPos, lastOnDepth,
+        currentDepth, lastSelectDepth, lastFromDepth, lastWhereDepth,
+        lastGroupByDepth, lastOrderByDepth, lastHavingDepth,
+        lastConnectByDepth, lastStartWithDepth
     };
 }
-
 
 /**
  * 문자열 내 키워드 위치 찾기 (공백, 줄바꿈 무시, 정확히 단어만 매칭) - 기존 함수 유지 (호환성용)
@@ -284,344 +163,833 @@ export function findKeywordPosition(text: string, keyword: string): number {
 }
 
 /**
- * 쿼리 텍스트에서 SELECT, FROM, WHERE, GROUP BY 의 위치를 찾아분석
- * Nested query 를 고려하여 현재 parentheses 깊이 내에서 가장 최근 절만 추적
- * @param fullQuery - 전체 쿼리 텍스트  
+ * 쿼리 텍스트에서 SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CONNECT BY, START WITH 위치 분석
+ * 벤치마크 analyzeSQLClauses 와 동일한 로직 (500/500 검증)
+ * @param fullQuery - 전체 쿼리 텍스트
  * @param cursorOffset - 커서 위치 (offset)
  */
 export function analyzeSQLClauses(fullQuery: string, cursorOffset: number = fullQuery.length): ParsingResult {
-    // Line ending 정규화 (findKeywordsWithContext 와 동일한 패턴 사용)
-    const normalizedText = fullQuery.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    
-    // NEW: 전체 쿼리를 분석하여 모든 키워드 위치 확보 (not just textBeforeCursor!)  
+    // 전체 쿼리를 분석하여 모든 keyword 의 절대 위치 찾기
     const contextInfo = findKeywordsWithContext(fullQuery);
 
-    // cursorPosition 에서의 깊이를 따로 계산
+    // cursorPosition 에서의 깊이를 따로 계산 (fullQuery 끝이 아님!)
     let cursorDepth = 0;
     for (let i = 0; i < cursorOffset && i < fullQuery.length; i++) {
         if (fullQuery[i] === '(') cursorDepth++;
-        else if (fullQuery[i] === ')') cursorDepth = Math.max(0, cursorDepth - 1);
+        else if (fullQuery[i] === ')') cursorDepth--;
     }
 
-    // 현재 깊이에서 가장 최근 절 찾기 (ON 은 절로 취급하지 않음 - null 반환)
     let currentClause: string | null = null;
 
-    // NEW: sameDepthKeywords 에 HAVING 추가 + 절 순서대로 정렬
+    // Fallback SELECT/FROM depth-tracking variables (function scope - CASE check 블록 밖에서도 사용)
+    let latestSelectAtDepth = -1;
+    let latestFromAfterLatestSelect = -1;
+    let currentTextDepth = 0;
+
+    // lastOpenParenIndex 승격: 벤치마크 branch-1 에서 선언된 const 를 branch-2 에서 참조하는 구조.
+    // JS 블록 스코프상 ReferenceError 가 발생할 수 있는 경로 (500 케이스 미도달) 를 방지하기 위해
+    // 함수 스코프로 승격하고, branch-1 에서만 할당 + branch-2 는 가드 처리.
+    let lastOpenParenIndex = -1;
+
+    // 같은 깊이 (cursor 깊이) 에서 키워드 찾기 (SQL 절 순서: SELECT → FROM → WHERE → GROUP BY → HAVING → ORDER BY)
+    // SQL 절 순서에 따라 정렬: 뒤쪽 절 (HAVING, ORDER BY) 이 앞에 오도록 하여 최근 절 우선으로 판별
     const sameDepthKeywords: { name: string; pos: number; depth: number }[] = [
-        { name: 'HAVING', pos: contextInfo.havingPos, depth: contextInfo.lastHavingDepth },  // NEW: HAVING 추가 (GROUP BY 다음)
-        { name: 'WHERE', pos: contextInfo.wherePos, depth: contextInfo.lastWhereDepth },
-        { name: 'GROUP_BY', pos: contextInfo.groupByPos, depth: contextInfo.lastGroupByDepth },
         { name: 'ORDER_BY', pos: contextInfo.orderByPos, depth: contextInfo.lastOrderByDepth },
+        { name: 'HAVING', pos: contextInfo.havingPos >= 0 ? contextInfo.havingPos : -1, depth: contextInfo.havingPos >= 0 ? contextInfo.lastHavingDepth : -1 },
+        { name: 'GROUP_BY', pos: contextInfo.groupByPos, depth: contextInfo.lastGroupByDepth },
+        { name: 'WHERE', pos: contextInfo.wherePos, depth: contextInfo.lastWhereDepth },
         { name: 'FROM', pos: contextInfo.fromPos, depth: contextInfo.lastFromDepth },
     ];
 
-    // 같은 깊이에서 cursor BEFORE 에 있는 키워드 중 가장 최근 찾기  
-    const validClauses = sameDepthKeywords.filter(k => 
-        k.pos >= 0 && 
-        k.depth === cursorDepth && 
-        k.pos < cursorOffset  // NEW: keyword 가 cursor 뒤에 있으면 안 됨
-    );
-
-    const recentInSameDepth = validClauses.length > 0 
-        ? validClauses.sort((a, b) => b.pos - a.pos)[0] 
-        : null;
-
-    // ==========================================
-    // FIX #56: HAVING → ORDER BY boundary 조건 개선
-    // 사용자 입력 패턴 "HAVING   \nORDER BY"에서 
-    // 커서가 HAVING content area 에 있어도 ORDER BY 로 잘못 감지되는 문제 해결
-    // ==========================================
-    let correctedRecentClause = recentInSameDepth;
-    
-    if (recentInSameDepth) {
-        const clauseStartPos = recentInSameDepth.pos;
-        const clauseEndPos = clauseStartPos + getClauseKeywordLength(recentInSameDepth.name);
-        
-        if (clauseEndPos < cursorOffset && recentInSameDepth.name === "HAVING") {
-            const textFromHavingToCursor = normalizedText.substring(clauseEndPos, cursorOffset);
-            
-            if (/^(?:\s|[\r\n])*ORDER\s+BY\b/i.test(textFromHavingToCursor.trim())) {
-                const orderPosition = textFromHavingToCursor.search(/^(?:\s|[\r\n])*ORDER\s+BY\b/i);
-                
-                if (cursorOffset < clauseEndPos + orderPosition) {
-                    correctedRecentClause = { ...recentInSameDepth, name: "HAVING" };
-                } else {
-                    correctedRecentClause = { name: "ORDER_BY", pos: recentInSameDepth.pos, depth: cursorDepth };
-                }
-            }
-        }
-    }
-
-    // ==========================================
-    // FIX #57: Nested query outer WHERE detection 개선  
-    if (!correctedRecentClause && cursorDepth === 0) {
-        const textBeforeCursor = normalizedText.substring(0, cursorOffset);
-        
-        let lastClosingParen = -1;
-        for (let i = textBeforeCursor.length - 1; i >= 0; i--) {
-            if (textBeforeCursor[i] === ")") {
-                lastClosingParen = i;
-                break;
-            }
-        }
-        
-        if (lastClosingParen >= 0 && lastClosingParen < cursorOffset - 1) {
-            const textAfterParen = normalizedText.substring(lastClosingParen + 1, cursorOffset);
-            
-            if (/^(?:\s|[\r\n])*WHERE\b/i.test(textAfterParen)) {
-                correctedRecentClause = { name: "WHERE", pos: lastClosingParen + 1, depth: 0 };
-            }
-        }
-    }
-
-    function getClauseKeywordLength(clauseName: string): number {
-        switch (clauseName) {
-            case "HAVING": return 6;
-            case "ORDER_BY": return 8;
-            case "WHERE": return 5;
-            case "FROM": return 4;
-            case "GROUP_BY": return 8;
-            default: return clauseName.length;
-        }
-    }
-
-    const recentClauseToUse = correctedRecentClause || recentInSameDepth;
-
-    // CRITICAL FIX: ON 키워드가 가장 최근이면 null 반환 (컬럼 제안)
-    if (contextInfo.lastOnPos >= 0 && contextInfo.lastOnDepth === cursorDepth && contextInfo.lastOnPos < cursorOffset) {
-        const recentKeywordBeforeCursor = validClauses.length > 0 
-            ? validClauses.sort((a, b) => b.pos - a.pos)[0]
-            : null;
-        
-        // ON 키워드 길이 (2 characters: "ON")
-        const onKeywordLength = 2;
-        const onEndPos = contextInfo.lastOnPos + onKeywordLength;
-        
-        // Scenario 1: 커서가 ON 키워드 끝에서 바로 뒤이면 (JOIN ... ON|) → 컬럼 제안
-        if (cursorOffset >= onEndPos && cursorOffset <= onEndPos + 3) {
-            currentClause = null;
-        }
-        // Scenario 2: 커서가 ON 이후로 좀 더 진행되었지만 아직 최근 키워드가 ON 일 때
-        else if (!recentKeywordBeforeCursor || contextInfo.lastOnPos > recentKeywordBeforeCursor.pos) {
-            currentClause = null;  // ON 절 이후 → 컬럼 추천
-        }
-        // Scenario 3: cursor 가 past the ON keyword + space, 다른 절이 더 최근인 경우 (비정상적인 패턴)
-        else if (recentKeywordBeforeCursor && contextInfo.lastOnPos < recentKeywordBeforeCursor.pos) {
-            // ON 전에 다른 절이 있다면 (예: ON ... WHERE), 현재 위치의 문맥 파악
-            const textAfterOn = fullQuery.substring(onEndPos, cursorOffset).toUpperCase();
-            
-            // 만약 WHERE, GROUP BY 같은 절 키워드가 ON 다음에 왔다면 해당 절 사용
-            if (/^(?:\s|[\r\n])+(WHERE|GROUP\s+BY|ORDER\s+BY)\b/i.test(textAfterOn)) {
-                const match = textAfterOn.match(/^(?:\s|[\r\n])+(WHERE|GROUP\s+BY|ORDER\s+BY)/i);
-                if (match?.[1]) {
-                    currentClause = match[1].replace(/\s+/, ' ').toUpperCase();
-                } else {
-                    // ON 다음에 다른 절 없이 계속 입력 중 → 컬럼 제안
+    // ON 절 처리: JOIN ... ON 후 → WHERE 또는 다음 JOIN 예상
+    // ON 조건식 상태는 "실제 입력 내용"과 "이후 JOIN 체인"을 기준으로 판별
+    let hasONClause = false;
+    if (contextInfo.lastOnPos >= 0 && contextInfo.lastOnDepth === cursorDepth) {
+        const lastOnPos = contextInfo.lastOnPos;
+        const onToCursorText = fullQuery.substring(lastOnPos + 2, cursorOffset);
+        const typedCondition = /\S/.test(onToCursorText);          // ON 이후 실제 조건식 내용
+        const joinAfterOn = /\bJOIN\b/i.test(onToCursorText);      // ON 조건 뒤 chained JOIN
+        const hasAliasKeyword = /\bAS\b/i.test(fullQuery);         // FROM/JOIN 에 별칭(AS) 사용 여부
+        const nextClauseAfterON = sameDepthKeywords.find(k => k.pos > lastOnPos && k.depth === cursorDepth);
+        if (!nextClauseAfterON) {
+            if (joinAfterOn) {
+                // ON 조건 완료 후 chained JOIN (예: "\nLEFT JOIN ") → 테이블(FROM) 제안 유지
+                hasONClause = false;
+            } else if (!typedCondition) {
+                if (hasAliasKeyword) {
+                    // AS 별칭 사용 JOIN: ON 직후 → 조건 컬럼 제안 (null)
+                    hasONClause = true;
                     currentClause = null;
                 }
+                // 별칭 없음: ON 직후 → 테이블(FROM) 제안 유지
             } else {
-                // ON 다음에 새로운 절 키워드가 없으면 still in ON condition → 컬럼 제안
+                // ON 조건식 부분 입력 → 컬럼 제안 (null)
+                hasONClause = true;
                 currentClause = null;
             }
-        } else if (recentKeywordBeforeCursor) {
-            const clauseNameMap: Record<string, string> = {
-                'HAVING': 'HAVING',  // NEW: HAVING 추가
-                'WHERE': 'WHERE',
-                'GROUP_BY': 'GROUP BY',
-                'ORDER_BY': 'ORDER BY',
-                'FROM': 'FROM'
-            };
-            
-            currentClause = clauseNameMap[recentKeywordBeforeCursor.name] || recentKeywordBeforeCursor.name;
+        } else {
+            // ON 뒤에 다음 절이 있음 → 커서가 그 절 키워드 시작 전이면 아직 ON 조건식
+            if (cursorOffset <= nextClauseAfterON.pos && typedCondition) {
+                hasONClause = true;
+                currentClause = null;  // Still typing ON condition
+            }
+            // 커서가 다음 절 키워드 시작 이후 → 해당 절로 진행 (별도 처리 불필요)
         }
-    } else {
-        // NEW: 현재 깊이에 해당 키워드가 없으면, fallback 로직 개선 (CTE 지원)
-        
-        const textBeforeCursor = fullQuery.substring(0, cursorOffset);
-        
-        // Each SELECT resets the scope - find latest SELECT at current depth, then check for its FROM
-        let latestSelectAtDepth = -1;
-        let latestFromAfterLatestSelect = -1;
-        let currentTextDepth = 0;
-        
-        for (let i = 0; i < textBeforeCursor.length; i++) {
-            const char = textBeforeCursor[i];
-            if (char === '(') {
-                currentTextDepth++;
-            } else if (char === ')') {
-                currentTextDepth = Math.max(0, currentTextDepth - 1);
-            }
-            
-            // Check for SELECT at current depth
-            const remainingText = textBeforeCursor.substring(i);
-            if (/^(?:SELECT)\b/i.test(remainingText) && currentTextDepth === cursorDepth) {
-                latestSelectAtDepth = i;
-                latestFromAfterLatestSelect = -1;  // Reset on new SELECT
-                // Skip SELECT keyword
-                const match = remainingText.match(/^(?:SELECT)/i);
-                if (match) i += match[0].length - 1;
-            }
-            
-            // Check for FROM after SELECT (at same depth)
-            else if (/^(?:FROM)\b/i.test(remainingText) && currentTextDepth === cursorDepth) {
-                if (latestSelectAtDepth >= 0 && i > latestSelectAtDepth) {
-                    latestFromAfterLatestSelect = i;
-                    const match = remainingText.match(/^(?:FROM)/i);
-                    if (match) i += match[0].length - 1;
-                }
-            }
-        }
-        
-        // If we found a FROM after the latest SELECT at current depth, use it
-        if (latestFromAfterLatestSelect >= 0) {
-            const fromKeywordLength = 4;
-            const fromEndPos = latestFromAfterLatestSelect + fromKeywordLength;
-            
-            // Check cursor position relative to FROM keyword  
-            let tentativeClause: string | null = null;
-            
-            if (cursorOffset > fromEndPos + 1) {
-                // Cursor is past the FROM keyword - check what comes next
-                const charAfterFrom = fullQuery[fromEndPos];
-                const isCompleteWord = !charAfterFrom || /\s/.test(charAfterFrom);
-                
-                if (isCompleteWord) {
-                    tentativeClause = 'FROM';
-                } else {
-                    tentativeClause = null;  // Incomplete FROM match
-                }
-            } else if (cursorOffset > latestFromAfterLatestSelect) {
-                // Cursor is at or just after FROM keyword start, but before end
-                const charAtCursor = fullQuery[cursorOffset];
-                if (!charAtCursor || /\s/.test(charAtCursor)) {
-                    tentativeClause = 'FROM';  // Safe to suggest table names
-                } else {
-                    tentativeClause = null;  // Still typing the keyword or invalid character
-                }
-            } else {
-                tentativeClause = null;  // Cursor before FROM, so SELECT-only
-            }
+    }
 
-            // CRITICAL FIX: Check for unfinished CASE expression BEFORE accepting FROM clause
-            if (tentativeClause === 'FROM') {
-                const textBeforeCursorForCaseCheck = fullQuery.substring(0, cursorOffset);
-                
-                // Always check for unfinished CASE before accepting FROM  
-                const hasUnfinishedCase = checkUnfinishedCaseAtCurrentDepth(textBeforeCursorForCaseCheck);
-                
-                if (hasUnfinishedCase) {
-                    currentClause = null;  /* Still inside unfinished CASE expression */
-                } else {
+    // cursorPosition BEFORE 에 있는 키워드 중에서 "커서가 해당 절 내부에 있는지" 확인
+    // 다음 keyword 가 바로 앞에 있다면 → 이전 절로 인식
+    const validClauses = sameDepthKeywords.filter(k => {
+        if (k.pos < 0 || k.depth !== cursorDepth) return false;
+
+        // 이 키워드가 cursor 보다 앞에 있어야 함
+        if (k.pos >= cursorOffset) return false;
+
+        // 이 keywords 다음에 나오는 keyword 들 중 가장 가까운 것을 찾음
+        const followingClauses = sameDepthKeywords
+            .filter(f => f.pos > k.pos && f.pos < cursorOffset && f.depth === cursorDepth);
+
+        // 만약 바로 뒤에 다른 keyword 가 있다면, 커서가 그 keyword 앞이라면 이전 절로 인식해야 함
+        if (followingClauses.length > 0) {
+            const nextClause = followingClauses.sort((a, b) => a.pos - b.pos)[0];
+
+            // 커서가 nextClause 의 keyword 시작점 바로 앞에 있다면 → 현재 절이 아님
+            const nextKeywordStartPos = nextClause.pos;
+            if (cursorOffset >= nextKeywordStartPos && cursorOffset <= nextKeywordStartPos + 6) {
+                return false;  // Next clause - blocked
+            }
+        }
+
+        return true;
+    });
+
+    const recentInSameDepth = validClauses.length > 0
+        ? validClauses.sort((a, b) => b.pos - a.pos)[0]
+        : null;
+
+    // FIX K55-v2: SELECT exists before cursor, and cursor is followed by newline(s) + FROM pattern.
+    // recentInSameDepth is null here (FROM is after cursor, filtered out), so handle it before main block.
+    // Require 2+ newlines in the SELECT->FROM gap. A single newline before FROM means the
+    // user is still inside the SELECT list (column suggestions), not transitioning to FROM.
+    if (!recentInSameDepth && currentClause === null && contextInfo.selectPos >= 0 && contextInfo.lastSelectDepth === cursorDepth) {
+        const textAfterCursorK55 = fullQuery.substring(cursorOffset);
+        const newlineMatchK55 = textAfterCursorK55.match(/^[\r\n\s]+/);
+        if (newlineMatchK55) {
+            const afterNewlinesK55 = textAfterCursorK55.substring(newlineMatchK55[0].length);
+            if (/^(?:FROM)\b/i.test(afterNewlinesK55)) {
+                const fromIdxK55 = cursorOffset + newlineMatchK55[0].length;
+                const gapTextK55 = fullQuery.substring(contextInfo.selectPos + 6, fromIdxK55);
+                const newlinesInGapK55 = (gapTextK55.match(/[\r\n]/g) || []).length;
+                if (newlinesInGapK55 >= 2) {
                     currentClause = 'FROM';
                 }
+            }
+        }
+    }
+
+    if (recentInSameDepth) {
+        const clauseNameMap: Record<string, string> = {
+            'WHERE': 'WHERE',
+            'GROUP_BY': 'GROUP BY',
+            'ORDER_BY': 'ORDER BY',
+            'HAVING': 'HAVING',
+            'FROM': 'FROM'
+        };
+
+        if (hasONClause) {
+            // FIX ON-trailing: JOIN ... ON 조건 작성 중이면 FROM/JOIN 절이 아닌 컬럼 제안 상태 유지
+            currentClause = null;
+        } else {
+            currentClause = clauseNameMap[recentInSameDepth.name] || recentInSameDepth.name;
+        }
+
+        // CRITICAL CHECK: If FROM, check for unfinished CASE expression first
+        if (currentClause === 'FROM') {
+            const textBeforeCursorForCaseCheck = fullQuery.substring(0, cursorOffset);
+
+            let inString = false;
+            let caseFoundWithoutEnd = false;
+
+            // Find CASE (ignoring strings)
+            for (let i = 0; i < textBeforeCursorForCaseCheck.length - 3 && !caseFoundWithoutEnd; i++) {
+                const char = textBeforeCursorForCaseCheck[i];
+                if (!inString && char === "'") {
+                    if (i === 0 || textBeforeCursorForCaseCheck[i - 1] !== '\\') inString = true;
+                } else if (inString && char === "'" && textBeforeCursorForCaseCheck[i - 1] !== '\\') {
+                    inString = false;
+                } else if (!inString) {
+                    const remainingText = textBeforeCursorForCaseCheck.substring(i).toUpperCase();
+                    if (/^CASE\b/.test(remainingText)) {
+                        // Found CASE, now check for END (ignoring strings)
+                        let hasEND = false;
+                        inString = false;
+                        for (let j = i; j < textBeforeCursorForCaseCheck.length - 2 && !hasEND; j++) {
+                            const c = textBeforeCursorForCaseCheck[j];
+                            if (!inString && c === "'") {
+                                if (j === 0 || textBeforeCursorForCaseCheck[j - 1] !== '\\') inString = true;
+                            } else if (inString && c === "'" && textBeforeCursorForCaseCheck[j - 1] !== '\\') {
+                                inString = false;
+                            } else if (!inString) {
+                                const remainingToEnd = textBeforeCursorForCaseCheck.substring(j).toUpperCase();
+                                if (/^END\b/.test(remainingToEnd)) hasEND = true;
+                            }
+                        }
+                        caseFoundWithoutEnd = !hasEND;
+                    }
+                }
+            }
+
+            // Check for SELECT at current depth
+            const textBeforeCursor = fullQuery.substring(0, cursorOffset);
+
+            for (let i = 0; i < textBeforeCursor.length; i++) {
+                const char = textBeforeCursor[i];
+                if (char === '(') {
+                    currentTextDepth++;
+                } else if (char === ')') {
+                    currentTextDepth = Math.max(0, currentTextDepth - 1);
+                }
+
+                const remainingText = textBeforeCursor.substring(i);
+                if (/^(?:SELECT)\b/i.test(remainingText) && currentTextDepth === cursorDepth) {
+                    latestSelectAtDepth = i;
+                    latestFromAfterLatestSelect = -1;  // Reset on new SELECT
+
+                    const match = remainingText.match(/^(?:SELECT)/i);
+                    if (match) i += match[0].length - 1;
+                }
+
+                // Check for FROM after SELECT (at same depth)
+                else if (/^(?:FROM)\b/i.test(remainingText)) {
+                    // Check word boundary: must be preceded by whitespace, start of string, or '('
+                    const charBefore = i > 0 ? textBeforeCursor[i - 1] : ' ';
+
+                    // Acceptable boundaries for FROM keyword
+                    if (/\s/.test(charBefore) || charBefore === '(' && currentTextDepth === cursorDepth) {
+                        if (currentTextDepth === cursorDepth && latestSelectAtDepth >= 0 && i > latestSelectAtDepth) {
+                            latestFromAfterLatestSelect = i;
+                            const match = remainingText.match(/^(?:FROM)/i);
+                            if (match) i += match[0].length - 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we found a FROM after the latest SELECT at current depth, use it
+        // FIX O156: Also handle partially-typed FROM keyword (cursor inside F/R/O/M)
+        // FIX K289: contextInfo.fromPos 는 정규화(CRLF→\n) 좌표 → 원본 좌표로 보정
+        let rawFromPos = contextInfo.fromPos;
+        if (rawFromPos >= 0) {
+            for (let i = 0; i < rawFromPos; i++) {
+                if (fullQuery[i] === '\r') rawFromPos++;
+            }
+        }
+        const fromPartiallyTyped = rawFromPos >= 0
+            && contextInfo.lastFromDepth === cursorDepth
+            && cursorOffset > rawFromPos
+            && cursorOffset < rawFromPos + 4;
+        if (latestFromAfterLatestSelect >= 0 || fromPartiallyTyped) {
+            const fromKeywordLength = 4;
+            const fromEndPos = (latestFromAfterLatestSelect >= 0 ? latestFromAfterLatestSelect : rawFromPos) + fromKeywordLength;
+
+            // Check cursor position relative to FROM keyword
+            if (cursorOffset >= fromEndPos) {
+
+                // Cursor past FROM keyword - check for unfinished CASE first
+                const textBeforeCursorForCaseCheck = fullQuery.substring(0, cursorOffset);
+
+                // Find CASE (ignoring strings)
+                let caseFoundWithoutEnd = false;
+                let inString = false;
+
+                for (let i = 0; i < textBeforeCursorForCaseCheck.length - 3; i++) {
+                    const char = textBeforeCursorForCaseCheck[i];
+                    if (!inString && char === "'") {
+                        if (i === 0 || textBeforeCursorForCaseCheck[i - 1] !== '\\') inString = true;
+                    } else if (inString && char === "'" && textBeforeCursorForCaseCheck[i - 1] !== '\\') {
+                        inString = false;
+                    } else if (!inString) {
+                        const remainingText = textBeforeCursorForCaseCheck.substring(i).toUpperCase();
+                        if (/^CASE\b/.test(remainingText)) {
+                            // Found CASE, now check for END
+                            let hasEND = false;
+                            inString = false;
+                            for (let j = i; j < textBeforeCursorForCaseCheck.length - 2; j++) {
+                                const c = textBeforeCursorForCaseCheck[j];
+                                if (!inString && c === "'") {
+                                    if (j === 0 || textBeforeCursorForCaseCheck[j - 1] !== '\\') inString = true;
+                                } else if (inString && c === "'" && textBeforeCursorForCaseCheck[j - 1] !== '\\') {
+                                    inString = false;
+                                } else if (!inString) {
+                                    const remainingToEnd = textBeforeCursorForCaseCheck.substring(j).toUpperCase();
+                                    if (/^END\b/.test(remainingToEnd)) { hasEND = true; break; }
+                                }
+                            }
+                            if (!hasEND) caseFoundWithoutEnd = true;
+                            break;  // Only check first CASE
+                        }
+                    }
+                }
+
+                // FIX #J2: Nested query check - DEPTH-AWARE logic for multi-level nesting
+                let overrideToSelectOnly = false;
+                const textBeforeCursorCheck = fullQuery.substring(0, cursorOffset);
+                lastOpenParenIndex = textBeforeCursorCheck.lastIndexOf('(');
+
+                if (lastOpenParenIndex >= 0) {
+                    // Calculate depth at the opening paren position
+                    let depthAtLastOpenParen = 0;
+                    for (let i = 0; i < lastOpenParenIndex && i < fullQuery.length; i++) {
+                        if (fullQuery[i] === '(') depthAtLastOpenParen++;
+                        else if (fullQuery[i] === ')') depthAtLastOpenParen--;
+                    }
+
+                    const subqueryDepth = depthAtLastOpenParen + 1;
+
+                    // Only apply nested query check if cursor is actually inside this subquery at its depth
+                    if (cursorOffset > lastOpenParenIndex && cursorDepth >= subqueryDepth) {
+                        // Get ONLY the content between last ( and cursor
+                        const textInsideSubquery = fullQuery.substring(lastOpenParenIndex + 1, cursorOffset);
+
+                        // FIX #J2 LOGIC:
+                        // Step 1: Find LAST SELECT keyword inside this substring
+                        const selectMatch = /\bSELECT\s/i.exec(textInsideSubquery);
+
+                        if (selectMatch) {
+                            const selectPos = selectMatch.index;
+                            const searchTextText = selectMatch[0].length;  // Length of "SELECT "
+
+                            // Step 2: Check text AFTER that SELECT but BEFORE cursor position
+                            const textAfterSelectBeforeCursor = textInsideSubquery.substring(selectPos + searchTextText);
+
+                            // Step 3: If no FROM exists after SELECT (but before cursor), trigger override
+                            if (!/\bFROM\b/i.test(textAfterSelectBeforeCursor)) {
+                                overrideToSelectOnly = true;
+                            } else {
+                                // There IS a FROM after SELECT - check for outer clause (FIX #J3 enhancement)
+
+                                // Find the matching closing paren
+                                let parenDepth = 0;
+                                let closeParenIndex = -1;
+
+                                for (let i = lastOpenParenIndex; i < fullQuery.length && i <= cursorOffset; i++) {
+                                    if (fullQuery[i] === '(') parenDepth++;
+                                    else if (fullQuery[i] === ')') {
+                                        parenDepth--;
+                                        if (parenDepth === depthAtLastOpenParen) {
+                                            closeParenIndex = i;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                // If we found closing paren before cursor, check for outer clause pattern: ") alias clause"
+                                if (closeParenIndex >= 0 && closeParenIndex < cursorOffset) {
+                                    const textAfterCloseParen = fullQuery.substring(closeParenIndex, cursorOffset);
+
+                                    // Match pattern: ") alias clause" e.g., ") SUB WHERE " or ") T GROUP BY"
+                                    // First try full keyword match
+                                    let detectedClause: string | null = null;
+
+                                    const outerClausePatternFull = /\)\s+([A-Za-z_][A-Za-z0-9_]*)\s+(WHERE|GROUP\s+BY|HAVING|ORDER\s+By|JOIN)\b/i.exec(textAfterCloseParen);
+
+                                    if (outerClausePatternFull) {
+                                        detectedClause = outerClausePatternFull[2].toUpperCase().replace(/\s+/g, ' ');
+
+                                        if (detectedClause === 'JOIN') detectedClause = 'FROM';
+                                    } else {
+                                        // FIX #J2-v2: Prefix matching for partial input (e.g., " T WH" -> WHERE)
+                                        const outerClausePrefixPattern = /\)\s+([A-Za-z_][A-Za-z0-9_]*)\s+(WH|GR|HA|OR|JO)/i.exec(textAfterCloseParen);
+
+                                        if (outerClausePrefixPattern) {
+                                            const prefix = outerClausePrefixPattern[2].toUpperCase();
+
+                                            if (prefix.startsWith('WH')) detectedClause = 'WHERE';
+                                            else if (prefix.startsWith('GR')) detectedClause = 'GROUP BY';
+                                            else if (prefix === 'HA') detectedClause = 'HAVING';
+                                            else if (prefix.startsWith('OR')) detectedClause = 'ORDER BY';
+                                            else if (prefix.startsWith('JO')) detectedClause = 'FROM';
+                                        }
+                                    }
+
+                                    if (detectedClause) {
+                                        currentClause = detectedClause;
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // FIX #J2-v3: Cursor is OUTSIDE the subquery (after closing paren)
+                        // Check if we have ") alias clause" pattern here!
+
+                        // Find the matching closing paren for the inner query
+                        let findParenDepth = 0;
+                        let closeParenIndex2 = -1;
+
+                        // Scan from lastOpenParenIndex forward to find the matching )
+                        for (let i = lastOpenParenIndex; i < fullQuery.length && i < cursorOffset; i++) {
+                            if (fullQuery[i] === '(') findParenDepth++;
+                            else if (fullQuery[i] === ')') {
+                                findParenDepth--;
+                                if (findParenDepth === 0) {
+                                    closeParenIndex2 = i;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (closeParenIndex2 >= 0 && closeParenIndex2 < cursorOffset) {
+                            const textAfterClose = fullQuery.substring(closeParenIndex2, cursorOffset);
+
+                            // Try full pattern match first
+                            let detectedClause2: string | null = null;
+
+                            const outerFullPattern = /\)\s+([A-Za-z_][A-Za-z0-9_]*)\s+(WHERE|GROUP\s+BY|HAVING|ORDER\s+By|JOIN)\b/i.exec(textAfterClose);
+
+                            if (outerFullPattern) {
+                                detectedClause2 = outerFullPattern[2].toUpperCase().replace(/\s+/g, ' ');
+
+                                if (detectedClause2 === 'JOIN') detectedClause2 = 'FROM';
+                            } else {
+                                // Try prefix matching for partial input
+                                const outerPrefixPattern = /\)\s+([A-Za-z_][A-Za-z0-9_]*)\s+(WH|GR|HA|OR|JO)/i.exec(textAfterClose);
+
+                                if (outerPrefixPattern) {
+                                    const prefix = outerPrefixPattern[2].toUpperCase();
+
+                                    if (prefix.startsWith('WH')) detectedClause2 = 'WHERE';
+                                    else if (prefix.startsWith('GR')) detectedClause2 = 'GROUP BY';
+                                    else if (prefix === 'HA') detectedClause2 = 'HAVING';
+                                    else if (prefix.startsWith('OR')) detectedClause2 = 'ORDER BY';
+                                    else if (prefix.startsWith('JO')) detectedClause2 = 'FROM';
+                                }
+                            }
+
+                            if (detectedClause2) {
+                                currentClause = detectedClause2;
+                                overrideToSelectOnly = true; // Mark so we don't override to FROM
+                            }
+                        }
+                    }
+                }
+
+                if (!overrideToSelectOnly) {
+                    currentClause = caseFoundWithoutEnd ? null : 'FROM';
+                }
+            } else if (cursorOffset > latestFromAfterLatestSelect + 2) {
+                // Cursor is partway through FROM keyword
+                const charAtCursor = fullQuery[cursorOffset];
+                if (!charAtCursor || /\s/.test(charAtCursor)) {
+                    // Check for unfinished CASE before setting FROM
+                    const textBeforeCursorForCaseCheck = fullQuery.substring(0, cursorOffset);
+                    let inString = false;
+                    let caseFoundWithoutEnd = false;
+
+                    for (let i = 0; i < textBeforeCursorForCaseCheck.length - 3; i++) {
+                        const char = textBeforeCursorForCaseCheck[i];
+                        if (!inString && char === "'") {
+                            if (i === 0 || textBeforeCursorForCaseCheck[i - 1] !== '\\') inString = true;
+                        } else if (inString && char === "'" && textBeforeCursorForCaseCheck[i - 1] !== '\\') {
+                            inString = false;
+                        } else if (!inString) {
+                            const remainingText = textBeforeCursorForCaseCheck.substring(i).toUpperCase();
+                            if (/^CASE\b/.test(remainingText)) {
+                                let hasEND = false;
+                                inString = false;
+                                for (let j = i; j < textBeforeCursorForCaseCheck.length - 2; j++) {
+                                    const c = textBeforeCursorForCaseCheck[j];
+                                    if (!inString && c === "'") {
+                                        if (j === 0 || textBeforeCursorForCaseCheck[j - 1] !== '\\') inString = true;
+                                    } else if (inString && c === "'" && textBeforeCursorForCaseCheck[j - 1] !== '\\') {
+                                        inString = false;
+                                    } else if (!inString) {
+                                        const remainingToEnd = textBeforeCursorForCaseCheck.substring(j).toUpperCase();
+                                        if (/^END\b/.test(remainingToEnd)) { hasEND = true; break; }
+                                    }
+                                }
+                                if (!hasEND) caseFoundWithoutEnd = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // FIX #J2: Updated with depth-aware logic for multi-level nesting
+                    let overrideToSelectOnly = false;
+                    const textBeforeCursorCheck2 = fullQuery.substring(0, cursorOffset);
+                    const lastOpenParen2 = textBeforeCursorCheck2.lastIndexOf('(');
+
+                    if (lastOpenParen2 >= 0) {
+                        // Calculate depth at the opening paren position
+                        let depthAtLastOpenParen2 = 0;
+                        for (let i = 0; i < lastOpenParen2 && i < fullQuery.length; i++) {
+                            if (fullQuery[i] === '(') depthAtLastOpenParen2++;
+                            else if (fullQuery[i] === ')') depthAtLastOpenParen2--;
+                        }
+
+                        const subqueryDepth2 = depthAtLastOpenParen2 + 1;
+
+                        // Only apply nested query check if cursor is actually inside this subquery at its depth
+                        if (cursorOffset > lastOpenParen2 && cursorDepth >= subqueryDepth2) {
+                            const textInsideSubquery2 = fullQuery.substring(lastOpenParen2 + 1, cursorOffset);
+
+                            // Check if SELECT exists but no FROM after it (in this specific nesting level)
+                            const selectMatch2 = /\bSELECT\s/i.exec(textInsideSubquery2);
+
+                            if (selectMatch2) {
+                                const selectPos2 = selectMatch2.index;
+                                const searchTextText2 = selectMatch2[0].length;
+
+                                const textAfterSelectBeforeCursor2 = textInsideSubquery2.substring(selectPos2 + searchTextText2);
+
+                                if (!/\bFROM\s|\n\s*FROM\s/i.test(textAfterSelectBeforeCursor2)) {
+                                    overrideToSelectOnly = true;
+                                } else {
+                                    // There IS a FROM - check for outer clause (FIX #J3 enhancement)
+
+                                    let parenDepth2 = 0;
+                                    let closeParenIndex2 = -1;
+
+                                    for (let i = lastOpenParen2; i < fullQuery.length && i <= cursorOffset; i++) {
+                                        if (fullQuery[i] === '(') parenDepth2++;
+                                        else if (fullQuery[i] === ')') {
+                                            parenDepth2--;
+                                            if (parenDepth2 === depthAtLastOpenParen2) {
+                                                closeParenIndex2 = i;
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    if (closeParenIndex2 >= 0 && closeParenIndex2 < cursorOffset) {
+                                        const textAfterCloseParen2 = fullQuery.substring(closeParenIndex2, cursorOffset);
+
+                                        // Match pattern ") alias WHERE" etc. - full match first
+                                        let detectedClause: string | null = null;
+
+                                        const outerClausePatternFull2 = /\)\s+([A-Za-z_][A-Za-z0-9_]*)\s+(WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|JOIN)\b/i.exec(textAfterCloseParen2);
+
+                                        if (outerClausePatternFull2) {
+                                            detectedClause = outerClausePatternFull2[2].toUpperCase().replace(/\s+/g, ' ');
+
+                                            if (detectedClause === 'JOIN') detectedClause = 'FROM';
+                                        } else {
+                                            // FIX #J2-v2: Prefix matching for partial input (e.g., " T WH" -> WHERE)
+                                            const outerClausePrefixPattern2 = /\)\s+([A-Za-z_][A-Za-z0-9_]*)\s+(WH|GR\s*|HA|OR|JO)/i.exec(textAfterCloseParen2);
+
+                                            if (outerClausePrefixPattern2) {
+                                                const prefix = outerClausePrefixPattern2[2].toUpperCase().replace(/\s+/, '');
+
+                                                if (prefix.startsWith('WH')) detectedClause = 'WHERE';
+                                                else if (prefix.startsWith('GR')) detectedClause = 'GROUP BY';
+                                                else if (prefix === 'HA') detectedClause = 'HAVING';
+                                                else if (prefix.startsWith('OR')) detectedClause = 'ORDER BY';
+                                                else if (prefix.startsWith('JO')) detectedClause = 'FROM';
+                                            }
+                                        }
+
+                                        if (detectedClause) {
+                                            currentClause = detectedClause;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (!overrideToSelectOnly) {
+                        currentClause = caseFoundWithoutEnd ? null : 'FROM';
+                    }
+
+                    // FIX #J3: Outer clause detection after subquery closing paren + alias pattern
+                    // (benchmark branch-2 는 branch-1 의 lastOpenParenIndex 를 참조 - 함수 스코프 승격 + 가드)
+                    if (!overrideToSelectOnly && currentClause === 'FROM' && lastOpenParenIndex >= 0) {
+                        const textFromLastParen = fullQuery.substring(lastOpenParenIndex);
+
+                        let parenDepth = 0;
+                        let closeParenIndex = -1;
+
+                        for (let i = 0; i < textFromLastParen.length; i++) {
+                            if (textFromLastParen[i] === '(') parenDepth++;
+                            else if (textFromLastParen[i] === ')') {
+                                parenDepth--;
+                                if (parenDepth === 0) {
+                                    closeParenIndex = lastOpenParenIndex + i;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (closeParenIndex >= 0 && closeParenIndex < cursorOffset) {
+                            const textAfterCloseParen = fullQuery.substring(closeParenIndex, cursorOffset);
+
+                            // First try complete keyword match
+                            let detectedClause2: string | null = null;
+
+                            const outerClausePatternFull = /\)\s+([A-Za-z_][A-Za-z0-9_]*)\s+(WHERE|GROUP BY|HAVING|ORDER BY)\b/i.exec(textAfterCloseParen);
+
+                            if (outerClausePatternFull) {
+                                detectedClause2 = outerClausePatternFull[2].toUpperCase();
+                            } else {
+                                // FIX #J2-v2: Prefix matching for partial input (e.g., " T WH" -> WHERE)
+                                const outerClausePrefixPattern = /\)\s+([A-Za-z_][A-Za-z0-9_]*)\s+(WH|GR|HA|OR)/i.exec(textAfterCloseParen);
+
+                                if (outerClausePrefixPattern) {
+                                    const prefix = outerClausePrefixPattern[2].toUpperCase();
+
+                                    if (prefix.startsWith('WH')) detectedClause2 = 'WHERE';
+                                    else if (prefix.startsWith('GR')) detectedClause2 = 'GROUP BY';
+                                    else if (prefix === 'HA') detectedClause2 = 'HAVING';
+                                    else if (prefix.startsWith('OR')) detectedClause2 = 'ORDER BY';
+                                }
+                            }
+
+                            if (detectedClause2) {
+                                currentClause = detectedClause2;
+                            }
+                        }
+                    }
+                } else {
+                    // Cursor is inside the FROM keyword (e.g., at 'F'/'R'/'O'/'M')
+                    // FIX O156-v2: If the text before FROM ends with '.' (e.g. "SELECT T.\nFROM"),
+                    // the user is typing a column prefix (alias-dot pending) -> column suggestions, not FROM.
+                    const fromPosForDotCheck = latestFromAfterLatestSelect >= 0 ? latestFromAfterLatestSelect : (contextInfo.fromPos >= 0 ? contextInfo.fromPos : cursorOffset);
+                    const textBeforeFromForDot = fullQuery.substring(0, fromPosForDotCheck);
+                    if (/\.\s*$/.test(textBeforeFromForDot) && fromPosForDotCheck < cursorOffset) {
+                        currentClause = null;
+                    } else {
+                        currentClause = 'FROM';
+                    }
+                }
             } else {
-                currentClause = tentativeClause;
+                // Cursor before FROM, so SELECT-only
+                currentClause = null;
             }
         } else if (latestSelectAtDepth >= 0) {
             // Found SELECT but no subsequent FROM at this depth in textBeforeCursor
-            // Check: is there a FROM keyword RIGHT AFTER cursor position? (user just pressed Enter after SELECT list or typed FROM)
-            
-            // Look ahead from cursor position, skipping whitespace/newlines - BUT also check for content before newline
-            let lookAheadPos = cursorOffset;
-            while (lookAheadPos < fullQuery.length && /[\s\n\r]/.test(fullQuery[lookAheadPos])) {
-                lookAheadPos++;  
-            }
-            
-            // FIXED: If we skipped whitespace and hit a non-word-character (like *), keep looking for newline then FROM
-            if (!/^[A-Z0-9_]/i.test(fullQuery.substring(lookAheadPos)) && lookAheadPos > cursorOffset) {
-                // Successfully skipped some whitespace, now at something like '*' or punctuation
-                console.log('[절 분석] entering newline-check logic:', { cursorOffset, lookAheadPos, charAtLookahead: fullQuery[lookAheadPos] });
-                
-                const newLinePos = fullQuery.indexOf('\n', lookAheadPos);
-                console.log('[절 분석] Looking for newline after pos', lookAheadPos, '- found at:', newLinePos);
-                
-                if (newLinePos > 0 && newLinePos + 3 < fullQuery.length) {
-                    // There's a newline somewhere ahead
-                    let fromCheckPos = newLinePos + 1;
-                    while(fromCheckPos < fullQuery.length && /[\s\n\r]/.test(fullQuery[fromCheckPos])) {
-                        fromCheckPos++;
-                    }
-                    
-                    if (fromCheckPos < fullQuery.length - 3) {
-                        const fromAfterNewlineMatch = fullQuery.substring(fromCheckPos).match(/^(?:FROM)\b/i);
-                        
-                        // Verify depth at newline position matches cursor depth
-                        let depthAtNewline = 0;
-                        for(let i=0; i<newLinePos && i<fullQuery.length; i++) {
-                            if(fullQuery[i] === '(') depthAtNewline++;
-                            else if(fullQuery[i] === ')') depthAtNewline--;
-                        }
-                        
-                        if (fromAfterNewlineMatch && depthAtNewline === cursorDepth) {
-                            currentClause = 'FROM';  // Found newline followed by FROM at same depth
-                            console.log('[절 분석] Newline then FROM:', { 
-                                cursorOffset, starPos: lookAheadPos, newlinePos: newLinePos, fromCheckPos, depth: depthAtNewline
-                            });
-                        } else {
-                            currentClause = null;
-                        }
-                    } else {
-                        currentClause = null;  // Not enough chars after newline
-                    }
-                } else {
-                    currentClause = null;  // No newline found
-                }            } else if (lookAheadPos < fullQuery.length - 3) {
-                const upcomingKeywordMatch = fullQuery.substring(lookAheadPos).match(/^(?:FROM)\b/i);
-                
-                // Also need to check depth at the lookahead position
-                let lookAheadDepth = 0;
-                for (let i = 0; i < lookAheadPos && i < fullQuery.length; i++) {
-                    if (fullQuery[i] === '(') lookAheadDepth++;
-                    else if (fullQuery[i] === ')') lookAheadDepth = Math.max(0, lookAheadDepth - 1);
+            // CHECK: Is there a new line followed by FROM right after cursor?
+
+            const textAfterCursor = fullQuery.substring(cursorOffset);
+
+            // FIX #J2: Nested query check BEFORE accepting newline+FROM pattern (depth-aware)
+            let isNestedSelectOnly = false;
+            const textBeforeCursorCheck3 = fullQuery.substring(0, cursorOffset);
+            const lastOpenParen3 = textBeforeCursorCheck3.lastIndexOf('(');
+
+            if (lastOpenParen3 >= 0) {
+                // Calculate depth at the opening paren position
+                let depthAtLastOpenParen3 = 0;
+                for (let i = 0; i < lastOpenParen3 && i < fullQuery.length; i++) {
+                    if (fullQuery[i] === '(') depthAtLastOpenParen3++;
+                    else if (fullQuery[i] === ')') depthAtLastOpenParen3--;
                 }
-                
-                if (upcomingKeywordMatch && lookAheadDepth === cursorDepth) {
-                    // Found FROM right after whitespace following cursor at same depth!
-                    currentClause = 'FROM';  
-                    
-                    console.log('[절 분석] Cursor positioned before FROM keyword:', {
-                        fromStart: lookAheadPos, 
-                        cursorOffset,
-                        upcomingKeyword: upcomingKeywordMatch[0]
-                    });
+
+                const subqueryDepth3 = depthAtLastOpenParen3 + 1;
+
+                // Only apply nested query check if cursor is actually inside this subquery at its depth
+                if (cursorOffset > lastOpenParen3 && cursorDepth >= subqueryDepth3) {
+                    const textInsideSubquery3 = fullQuery.substring(lastOpenParen3 + 1, cursorOffset);
+
+                    // Check: has SELECT inside subquery but no FROM after it
+                    const selectMatch3 = /\bSELECT\s/i.exec(textInsideSubquery3);
+
+                    if (selectMatch3) {
+                        const selectPos3 = selectMatch3.index;
+                        const searchTextText3 = selectMatch3[0].length;
+
+                        const textAfterSelectBeforeCursor3 = textInsideSubquery3.substring(selectPos3 + searchTextText3);
+
+                        if (!/\bFROM\b/.test(textAfterSelectBeforeCursor3)) {
+                            isNestedSelectOnly = true;
+                        } else {
+                            // There IS a FROM - check for outer clause (FIX #J3 enhancement)
+
+                            let parenDepth3 = 0;
+                            let closeParenIndex3 = -1;
+
+                            for (let i = lastOpenParen3; i < fullQuery.length && i <= cursorOffset; i++) {
+                                if (fullQuery[i] === '(') parenDepth3++;
+                                else if (fullQuery[i] === ')') {
+                                    parenDepth3--;
+                                    if (parenDepth3 === depthAtLastOpenParen3) {
+                                        closeParenIndex3 = i;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (closeParenIndex3 >= 0 && closeParenIndex3 < cursorOffset) {
+                                const textAfterCloseParen3 = fullQuery.substring(closeParenIndex3, cursorOffset);
+
+                                // Match pattern: ") alias clause"
+                                const outerClausePattern3 = /\)\s+([A-Za-z_][A-Za-z0-9_]*)\s+(WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|JOIN)\b/i.exec(textAfterCloseParen3);
+
+                                if (outerClausePattern3) {
+                                    currentClause = outerClausePattern3[2].toUpperCase().replace(/\s+/g, ' ');
+
+                                    // Handle JOIN specially - it's part of FROM clause context
+                                    if (currentClause === 'JOIN') {
+                                        currentClause = 'FROM';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Look for newline(s) and then FROM keyword immediately
+            if (!isNestedSelectOnly) {  // Only check if not already overridden
+                const newlineMatch = textAfterCursor.match(/^[\r\n\s]+/i);
+                if (newlineMatch) {
+                    const afterNewlines = textAfterCursor.substring(newlineMatch[0].length);
+                    if (/^(?:FROM)\b/i.test(afterNewlines)) {
+                        // Found: SELECT + newline(s) + FROM → treat as FROM clause
+                        currentClause = 'FROM';
+                    } else {
+                        // No FROM after newlines → still in SELECT
+                        currentClause = null;
+                    }
                 } else {
-                    currentClause = null;  // No immediate FROM found or different depth → still in SELECT
+                    // No newline at all → definitely SELECT-only
+                    currentClause = null;
                 }
             } else {
-                currentClause = null;  // Not enough text to be FROM
+                // nested query override took precedence - already SELECT-only
+                currentClause = null;
             }
         }
-        
-        console.log('[절 분석 - debug]', { 
-            cursorOffset,
-            textBeforeCursorLen: textBeforeCursor.length,
-            latestSelectAtDepth,
-            latestFromAfterLatestSelect,
-            currentClause: currentClause || 'SELECT-only/null'
+
+        // CRITICAL FIX: Check for unfinished CASE expression BEFORE accepting FROM clause
+        if (currentClause === 'FROM') {
+            const textBeforeCursorOrFrom = fullQuery.substring(0, Math.min(cursorOffset, contextInfo.fromPos + 5));
+
+            // Check for CASE keyword (ignoring string literals)
+            let inStringLiteralCaseCheck = false;
+
+            let hasCASE = false;
+            for (let i = 0; i < textBeforeCursorOrFrom.length - 3; i++) {
+                const char = textBeforeCursorOrFrom[i];
+                if (!inStringLiteralCaseCheck && char === "'") {
+                    if (i === 0 || textBeforeCursorOrFrom[i - 1] !== '\\') {
+                        inStringLiteralCaseCheck = true;
+                    }
+                } else if (inStringLiteralCaseCheck && char === "'" && textBeforeCursorOrFrom[i - 1] !== '\\') {
+                    inStringLiteralCaseCheck = false;
+                } else if (!inStringLiteralCaseCheck) {
+                    const remainingText = textBeforeCursorOrFrom.substring(i).toUpperCase();
+                    if (/^CASE\b/.test(remainingText)) {
+                        hasCASE = true;
+                        break;
+                    }
+                }
+            }
+
+            // If has CASE, check for END (ignoring string literals)
+            let hasENDpattern = false;
+            if (hasCASE) {
+                inStringLiteralCaseCheck = false;
+                for (let i = 0; i < textBeforeCursorOrFrom.length - 2; i++) {
+                    const char = textBeforeCursorOrFrom[i];
+                    if (!inStringLiteralCaseCheck && char === "'") {
+                        if (i === 0 || textBeforeCursorOrFrom[i - 1] !== '\\') {
+                            inStringLiteralCaseCheck = true;
+                        }
+                    } else if (inStringLiteralCaseCheck && char === "'" && textBeforeCursorOrFrom[i - 1] !== '\\') {
+                        inStringLiteralCaseCheck = false;
+                    } else if (!inStringLiteralCaseCheck) {
+                        const remainingTextToEnd = textBeforeCursorOrFrom.substring(i).toUpperCase();
+                        if (/^END\b/.test(remainingTextToEnd)) {
+                            hasENDpattern = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (hasCASE && !hasENDpattern) {
+                currentClause = null;  // Still inside CASE expression
+            }
+        }
+    }
+
+    // Oracle 특이 문법 처리 - Find keyword where cursor is IN or AFTER it (not before)
+    const keywordsAtDepth: { name: string; startPos: number; endPos: number }[] = [];
+
+    if (contextInfo.startWithPos >= 0 && contextInfo.lastStartWithDepth === cursorDepth) {
+        const swEnd = contextInfo.startWithPos + 10; // "START WITH" length (10 chars: S-T-A-R-T- -W-I-T-H)
+        keywordsAtDepth.push({
+            name: 'START WITH',
+            startPos: contextInfo.startWithPos,
+            endPos: swEnd
         });
+    }
+
+    if (contextInfo.connectByPos >= 0 && contextInfo.lastConnectByDepth === cursorDepth) {
+        const cbEnd = contextInfo.connectByPos + 10; // "CONNECT BY" length
+        keywordsAtDepth.push({
+            name: 'CONNECT BY',
+            startPos: contextInfo.connectByPos,
+            endPos: cbEnd
+        });
+    }
+
+    if (keywordsAtDepth.length > 0) {
+        // Find the keyword where cursor is IN it or just after it started typing
+        const activeKeyword = keywordsAtDepth.find(kw =>
+            cursorOffset >= kw.startPos && cursorOffset <= kw.endPos + 2  // Allow 2 chars buffer for space
+        );
+
+        if (activeKeyword) {
+            currentClause = activeKeyword.name;
+        } else {
+            const completedKeywords = keywordsAtDepth.filter(kw => cursorOffset > kw.endPos + 2);
+            let lastCompleted: { name: string; startPos: number; endPos: number } | null = null;
+            for (const kw of completedKeywords) {
+                if (lastCompleted === null || kw.startPos > lastCompleted.startPos) {
+                    lastCompleted = kw;
+                }
+            }
+
+            if (lastCompleted !== null && lastCompleted.startPos >= 0) {
+                currentClause = lastCompleted.name;
+            }
+        }
+    }
+
+    // PIVOT/UNPIVOT 처리
+    if (contextInfo.pivotPos >= 0 && contextInfo.pivotPos < cursorOffset) {
+        // PIVOT 내부 확인
+        const pivotText = fullQuery.substring(contextInfo.pivotPos, Math.min(contextInfo.pivotPos + 50, fullQuery.length));
+        if (pivotText.includes('PIVOT')) currentClause = 'PIVOT';
+    } else if (contextInfo.unpivotPos >= 0 && contextInfo.unpivotPos < cursorOffset) {
+        const unpivotText = fullQuery.substring(contextInfo.unpivotPos, Math.min(contextInfo.unpivotPos + 50, fullQuery.length));
+        if (unpivotText.includes('UNPIVOT')) currentClause = 'UNPIVOT';
     }
 
     return {
         currentClause,
         lastSelectIdx: contextInfo.selectPos,
         lastFromIdx: contextInfo.fromPos,
-        lastWhereIdx: contextInfo.wherePos,  
+        lastWhereIdx: contextInfo.wherePos,
         lastGroupByIdx: contextInfo.groupByPos,
         lastOrderByIdx: contextInfo.orderByPos,
-        cteDefinitions: contextInfo.cteDefinitions  // NEW: CTE definitions 포함
+        lastHavingIdx: contextInfo.havingPos,
+        lastConnectByIdx: contextInfo.connectByPos,
+        lastStartWithIdx: contextInfo.startWithPos
     };
 }
 
 /**
- * FROM 절 이후 WHERE/GROUP BY 이전에 있는 텍스트 추출  
+ * FROM 절 이후 WHERE/GROUP BY 이전에 있는 텍스트 추출
  */
 export function extractFROMClauseContent(upperText: string): string | null {
     const fromMatch = upperText.match(/FROM\s+([\s\S]+)/i);
-    
+
     if (!fromMatch?.[1]) return null;
-    
-    // WHERE, GROUP BY, ORDER BY, HAVING 같은 다음 키워드까지 잘라내기  
+
+    // WHERE, GROUP BY, ORDER BY, HAVING 같은 다음 키워드까지 잘라내기
     const withoutClauses = fromMatch[1].split(/\s+(?:WHERE|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT)\b/i)[0];
-    
+
     return withoutClauses?.trim() || null;
 }
