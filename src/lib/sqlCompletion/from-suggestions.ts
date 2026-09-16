@@ -21,8 +21,6 @@ export function createFromTableSuggestions(
         tableName.startsWith(partialName.toUpperCase())
     );
 
-    console.log('[FromSuggestions]  Matching tables:', matchingTables);
-
     if (matchingTables.length === 0) return [];
 
     return matchingTables.slice(0, 50).map(tableName => ({
@@ -95,18 +93,10 @@ export function handleFromCompletion(
     const monacoLanguages = (window as any).monaco?.languages;
     if (!monacoLanguages) return [];
 
-    console.log('[FromCompletion]  Processing FROM clause completion:', {
-        partialNameFromInput,
-        targetTableName,
-        hasValidTableInFROM
-    });
-
     // 테이블명 제안 우선
     const inputToUse = partialNameFromInput || targetTableName || '';
 
     if (inputToUse) {
-        console.log('[FromCompletion]  FROM 절: 테이블명 전용 자동완성 모드');
-
         const tableSuggestions = createFromTableSuggestions(
             inputToUse,
             tableColumns,
@@ -114,12 +104,10 @@ export function handleFromCompletion(
         );
 
         if (tableSuggestions.length > 0) {
-            console.log('[FromCompletion]  Returning', tableSuggestions.length, 'table suggestions');
             return tableSuggestions;
         }
     }
 
     // Fallback: 전체 테이블 목록 + 키워드
-    console.log('[FromCompletion] ️ No specific matches, using fallback with all tables');
     return createFromFallbackSuggestions(tableColumns, sqlKeywords, monacoLanguages);
 }

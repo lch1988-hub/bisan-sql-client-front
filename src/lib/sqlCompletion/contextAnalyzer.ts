@@ -20,21 +20,8 @@ export function parseQueryContext(
 ): ParsedContext | null {
     const cursorOffset = monacoPositionToOffset(modelValue, position);
     
-    console.log('[parseQueryContext] DEBUG:', {
-        fullModelValue: modelValue.length > 100 ? `${modelValue.substring(0, 80)}...` : modelValue,
-        cursorPosition: position,  
-        cursorOffset,
-        modelLength: modelValue.length  
-    });
-    
     try {
         const queryAtCursor = getQueryAtCursor(modelValue, cursorOffset);
-        
-        console.log('[parseQueryContext] QueryAtCursor result:', {
-            queryText: queryAtCursor?.queryText,
-            queryIndex: queryAtCursor?.queryIndex,  
-            statementStartOffset: queryAtCursor?.statementStartOffset
-        });
         
         if (!queryAtCursor) {
             return null;

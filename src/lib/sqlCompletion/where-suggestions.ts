@@ -21,16 +21,8 @@ export function createWhereColumnSuggestions(
         ? currentWordUpper.split('.')[1] || ''  // Get part after first dot
         : '';
     
-    console.log('[createWhereColumnSuggestions] Filtering columns:', {
-        input: currentWordUpper,
-        alias: aliasName,
-        partialColumn: partialColumn || '(empty - show all)',
-        totalColumnsAvailable: columns.length
-    });
-    
     // If no typing after the dot (just "A."), show ALL columns
     if (!partialColumn || partialColumn.length === 0) {
-        console.log('[createWhereColumnSuggestions] ℹ️ Empty column input  showing 2 50 columns');
         return columns.slice(0, 50).map(col => ({
             label: col,
             kind: monacoLanguages.CompletionItemKind.Field,
@@ -47,11 +39,8 @@ export function createWhereColumnSuggestions(
     );
 
     if (filteredColumns.length === 0) {
-        console.log('[createWhereColumnSuggestions] ️ No matching columns for', partialColumn);
         return [];
     }
-
-    console.log('[createWhereColumnSuggestions]  Found', filteredColumns.length, 'matching columns');
     
     return filteredColumns.slice(0, 50).map(col => ({
         label: col,
@@ -153,36 +142,17 @@ export function handleWhereCompletion(
     const monacoLanguages = (window as any).monaco?.languages;
     if (!monacoLanguages) return [];
 
-    console.log('[WhereCompletion]  Processing WHERE clause completion:', {
-        currentWordUpper,
-        effectiveCurrentWord,
-        targetTableName,
-        partialNameFromInput,
-        hasDot: effectiveCurrentWord.includes('.')
-    });
-
     // Case 1: alias.column 형식 - 컬럼 제안
     if (effectiveCurrentWord.includes('.')) {
-        console.log('[WhereCompletion]  Detected alias.column format  suggesting columns');
-
         const targetType = targetTableName;
         
         if (!targetType) {
-            console.log('[WhereCompletion] ️ No target table resolved, falling back');
             return createWhereFallbackSuggestions(tableColumns, sqlKeywords, monacoLanguages);
         }
 
         //  [DEBUG] Check if table exists in metadata
         const allTableKeys = Object.keys(tableColumns || {});
         const tableExistsInMetadata = allTableKeys.includes(targetType.toUpperCase());
-        
-        console.log('[WhereCompletion]  Table resolution check:', {
-            resolvedTable: targetType,
-            aliasUsed: partialNameFromInput,
-            existsInMetadata: tableExistsInMetadata,
-            availableTables: allTableKeys.slice(0, 10).join(', '),
-            totalTables: allTableKeys.length
-        });
 
         //  [CRITICAL] First try exact key match, then case-insensitive
         let columns = tableColumns?.[targetType];
@@ -192,28 +162,12 @@ export function handleWhereCompletion(
             const foundTableKey = allTableKeys.find(key => key.toUpperCase() === targetType.toUpperCase());
             
             if (foundTableKey && tableColumns?.[foundTableKey]) {
-                console.log('[WhereCompletion]  Found matching table with different casing:', {
-                    resolved: targetType,
-                    actualKey: foundTableKey,
-                    columnCount: tableColumns[foundTableKey]?.length || 0,
-                    firstFiveCols: tableColumns[foundTableKey]?.slice(0, 5) || []
-                });
-                
                 columns = tableColumns[foundTableKey];
                 usedTableKey = foundTableKey;
             } else {
                 console.warn('[WhereCompletion] ️ Table not found even with case-insensitive lookup');
             }
         }
-        
-        //  Show detailed debug info about the resolved table
-        console.log('[WhereCompletion]  Resolved table details:', {
-            keyUsed: usedTableKey,
-            aliasUsed: partialNameFromInput,
-            columnCount: columns?.length || 0,
-            hasColumns: !!(columns && columns.length > 0),
-            firstFiveColumns: (columns || []).slice(0, 5)
-        });
         
         //  Fallback: Resolved table not in metadata - search ALL tables for matching columns
         if (!columns || columns.length === 0) {
@@ -223,8 +177,6 @@ export function handleWhereCompletion(
             const foundTableKey = allTableKeys.find(key => key.toUpperCase() === targetType.toUpperCase());
             
             if (foundTableKey && tableColumns?.[foundTableKey]) {
-                console.log('[WhereCompletion]  Found matching table with different casing:', foundTableKey);
-                
                 // Check if columns exist before accessing them
                 const cols = tableColumns[foundTableKey];
                 if (cols) {
@@ -243,8 +195,6 @@ export function handleWhereCompletion(
             }
             
             //  [NEW] Fallback: Show ALL columns from ALL available tables with table prefix
-            console.log('[WhereCompletion]  Falling back to ALL available columns across all tables');
-            
             const globalColumnSuggestions: CompletionItem[] = [];
             
             for (const [tableName, cols] of Object.entries(tableColumns || {})) {
@@ -273,13 +223,10 @@ export function handleWhereCompletion(
             }
             
             if (globalColumnSuggestions.length > 0) {
-                console.log('[WhereCompletion]  Returning', globalColumnSuggestions.length, 
-                           'columns from ALL available tables as fallback');
                 return globalColumnSuggestions;
             }
             
             // Still nothing - fall back to keywords only
-            console.log('[WhereCompletion] ️ No columns found anywhere, using SQL keywords');
             return createWhereFallbackSuggestions(tableColumns, sqlKeywords, monacoLanguages);
         }
 
@@ -291,8 +238,6 @@ export function handleWhereCompletion(
             monacoLanguages
         );
 
-        console.log('[WhereCompletion]  No columns matched the partial input, showing up to 50 columns');
-
         const allColumns = (columns || []).slice(0, 50).map(col => ({
             label: col,
             kind: monacoLanguages.CompletionItemKind.Field,
@@ -303,22 +248,14 @@ export function handleWhereCompletion(
         }));
 
         if (allColumns.length > 0) {
-            console.log('[WhereCompletion]  Returning', allColumns.length, '- ALL columns from table');
             return allColumns;
         }
 
         // Final fallback to other tables or keywords
-        console.log('[WhereCompletion] ️ No columns at all - falling back to keywords');
         return createWhereFallbackSuggestions(tableColumns, sqlKeywords, monacoLanguages);
     }
 
     // Case 2: 점이 없는 입력 - 테이블명/alias 제안 또는 컬럼 필터링
-    console.log('[WhereCompletion]  No dot detected', { 
-        targetTableName, 
-        targetTableNames,  // NEW: 모든 FROM 테이블 배열
-        partialNameFromInput,
-        hasAvailableColumns: !!tableColumns?.[targetTableName || '']
-    });
 
     // [NEW] targetTableNames 이 있으면 해당 테이블들의 컬럼을 모아서 제안
     if (targetTableNames && targetTableNames.length > 0) {
@@ -334,9 +271,6 @@ export function handleWhereCompletion(
                         col.toUpperCase().includes(partialNameFromInput.toUpperCase())
                     );
                     
-                    console.log('[WhereCompletion]  Filtering columns from', tableName, 
-                               'with partial:', partialNameFromInput, '→ Found', matchingCols.length);
-                    
                     for (const col of matchingCols.slice(0, 50)) {
                         allMatchingCols.push({
                             label: col,
@@ -349,8 +283,6 @@ export function handleWhereCompletion(
                     }
                 } else {
                     // partialName 이 없으면 모든 컬럼 제안 (모든 FROM 테이블)
-                    console.log('[WhereCompletion]  No partial input, showing ALL columns from', tableName);
-                    
                     for (const col of columns.slice(0, 50)) {
                         allMatchingCols.push({
                             label: col,
@@ -371,7 +303,6 @@ export function handleWhereCompletion(
         );
         
         if (deduplicated.length > 0) {
-            console.log('[WhereCompletion]  Returning', deduplicated.length, 'columns from ALL target tables');
             return deduplicated.slice(0, 50);
         }
     }
@@ -385,12 +316,10 @@ export function handleWhereCompletion(
         );
 
         if (tableSuggestions.length > 0) {
-            console.log('[WhereCompletion]  Returning', tableSuggestions.length, 'table suggestions');
             return tableSuggestions;
         }
     }
 
     // Fallback: 전체 테이블 목록 + 키워드
-    console.log('[WhereCompletion] ️ No matches, using fallback');
     return createWhereFallbackSuggestions(tableColumns, sqlKeywords, monacoLanguages);
 }

@@ -170,24 +170,14 @@ export function handleOrderByCompletion(
     const monacoLanguages = (window as any).monaco?.languages;
     if (!monacoLanguages) return [];
 
-    console.log('[OrderByCompletion] Processing ORDER BY clause completion:', {
-        partialNameFromInput,
-        targetTableName,
-        effectiveCurrentWord: effectiveCurrentWord || 'undefined'
-    });
-
     // Case 1: "alias." 형식 처리 - SELECT 절에 이미 있는 컬럼들 제안
     if (effectiveCurrentWord && effectiveCurrentWord.endsWith('.')) {
         const aliasName = effectiveCurrentWord.substring(0, effectiveCurrentWord.length - 1).toUpperCase();
-        
-        console.log('[OrderByCompletion] Dot format detected:', aliasName);
 
         // targetTableName 이 이미 추출되었으면 해당 테이블의 컬럼 제안
         if (targetTableName) {
             const columns = tableColumns?.[targetTableName];
             if (columns && columns.length > 0) {
-                console.log('[OrderByCompletion] Returning', columns.length, 'column suggestions for alias');
-
                 return createOrderByColumnSuggestions(
                     targetTableName,
                     columns,
@@ -206,8 +196,6 @@ export function handleOrderByCompletion(
         if (resolvedTable) {
             const columns = tableColumns?.[resolvedTable];
             if (columns && columns.length > 0) {
-                console.log('[OrderByCompletion] Resolved to', resolvedTable, 'returning', columns.length, 'cols');
-
                 return createOrderByColumnSuggestions(
                     resolvedTable,
                     columns,
@@ -228,8 +216,6 @@ export function handleOrderByCompletion(
     const inputToUse = partialNameFromInput || targetTableName || '';
 
     if (inputToUse) {
-        console.log('[OrderByCompletion] Checking for matching columns first...');
-
         // 테이블명이면 해당 테이블의 컬럼 제안
         if (tableColumns?.[inputToUse]) {
             const columns = tableColumns[inputToUse];
@@ -244,8 +230,6 @@ export function handleOrderByCompletion(
             }
 
             if (suggestedColumns && suggestedColumns.length > 0) {
-                console.log('[OrderByCompletion] Returning', suggestedColumns.length, 'column suggestions');
-
                 return createOrderByColumnSuggestions(
                     inputToUse,
                     suggestedColumns.slice(0, 50),
@@ -259,14 +243,12 @@ export function handleOrderByCompletion(
             const tableSuggestions = createOrderByTableSuggestions(inputToUse, tableColumns, monacoLanguages);
 
             if (tableSuggestions.length > 0) {
-                console.log('[OrderByCompletion] Returning', tableSuggestions.length, 'table suggestions');
                 return tableSuggestions;
             }
         }
     }
 
     // Fallback: 전체 테이블 + 컬럼 목록 + ASC/DESC 키워드
-    console.log('[OrderByCompletion] Using fallback - offering all tables/columne + keywords');
     return createOrderByFallbackSuggestions(
         tableColumns, 
         ['asc', 'desc', 'nulls', 'first', 'last'], 

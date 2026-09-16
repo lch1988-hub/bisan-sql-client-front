@@ -15,15 +15,7 @@ export function extractCurrentWord(
     word: any,
     textBeforeCursor: string
 ): WordExtractionResult {
-    console.log('[CONSOLE TEST] wordExtractor 호출:', { 
-        word: JSON.stringify(word), 
-        textBeforeCursorEnd: textBeforeCursor.slice(-30) 
-    });
-
     const currentWordUpper = word?.word ? word.word.toUpperCase() : '';
-
-    console.log('[CONSOLE TEST] Monaco word object:', word);
-    console.log('[CONSOLE TEST] currentWordUpper:', currentWordUpper);
 
     let effectiveCurrentWord = currentWordUpper;
     let extractedFromFallback = false;
@@ -36,11 +28,6 @@ export function extractCurrentWord(
             const beforeDot = textBeforeCursor.substring(0, lastDotIndex).trim();
             const words = beforeDot.split(/\s+/);
             const potentialAlias = words[words.length - 1] || '';
-            
-            console.log('[CONSOLE TEST] Dot format detected:', { 
-                alias: potentialAlias,
-                position: lastDotIndex 
-            });
             
             // "." 만 입력된 상태에서는 빈 문자열 반환 (표시 후 컬럼 추천)
             effectiveCurrentWord = '';  // 빈 문자열이지만 컨택스트가 "X." 형식임
@@ -57,16 +44,7 @@ export function extractCurrentWord(
         if (lastTokenMatch) {
             effectiveCurrentWord = lastTokenMatch[1].toUpperCase();
             
-            console.log('[CONSOLE TEST] Fallback: Extracted from text:', effectiveCurrentWord);
-            
             extractedFromFallback = true;
-        } else {
-            // 마지막 문자가 공백이면 빈 문자열 유지 (아직 입력 시작 안 함)
-            if (!textBeforeCursor.trimEnd().endsWith(' ')) {
-                console.log('[CONSOLE TEST] No match found, text before cursor:', textBeforeCursor.endsWith(' ') 
-                    ? '(ends with space)' 
-                    : textBeforeCursor);
-            }
         }
     }
 

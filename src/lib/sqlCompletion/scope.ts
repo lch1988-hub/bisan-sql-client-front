@@ -52,28 +52,16 @@ export function getCurrentSelect(selectPositions: Array<{ pos: number; depth: nu
 export function extractSelectSegment(fullText: string, selectPos: number, cursorPos: number): string {
     // FULL 텍스트 사용 (cursorPosition 제한 없이 끝까지 추출 후 WHERE 또는 ) 에서 잘라내기)
     let segment = fullText.substring(selectPos);
-    
-    console.log('[extractSelectSegment] Initial:', { 
-        len: segment.length, 
-        hasFROM: /FROM\b/i.test(segment),
-        preview: segment.substring(0, 80) + '...' 
-    });
 
     // WHERE 가 있으면 거기까지만 잘라냄
     const whereIdx = segment.toUpperCase().search(/\bWHERE\b/);
     if (whereIdx > 0) {
         segment = segment.substring(0, whereIdx);
-        console.log('[extractSelectSegment] Trimmed at WHERE:', { len: segment.length });
     } else {
         // 닫는 괄호가 있으면 거기까지만
         const closeParenIndex = segment.lastIndexOf(')');
         if (closeParenIndex > 0 && closeParenIndex < segment.length - 5) {
             segment = segment.substring(0, closeParenIndex + 1);
-            console.log('[extractSelectSegment] Trimmed at ): ', { 
-                len: segment.length, 
-                hasFROM: /FROM\b/i.test(segment), 
-                preview: segment.substring(0,60) 
-            });
         }
     }
 
@@ -116,14 +104,8 @@ export function extractScopedAliases(queryText: string, cursorOffset: number): S
         };
     }
     
-    const localAliases = extractFromClause(scope.currentSelectSegment);
+const localAliases = extractFromClause(scope.currentSelectSegment);
     const isNested = scope.currentDepth > 0;
-    
-    console.log('[extractScopedAliases] LOCAL SCOPE:', {
-        depth: scope.currentDepth,
-        aliasMap: localAliases,
-        segmentPreview: scope.currentSelectSegment.substring(0, 80) + '...'
-    });
     
     return { localAliases, isNested };
 }

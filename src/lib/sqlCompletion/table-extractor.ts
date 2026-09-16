@@ -24,14 +24,9 @@ export function extractTableFromFROMClause(
         return {targetTableName: null, partialNameFromInput: null};
     }
 
-    console.log('[DEBUG] FROM 절 전체:', fromContent);
-
     // 콤마 단위로 분리하여 마지막 부분 추출 (여러 테이블 지원)  
     const tableParts = fromContent.split(',');
     let currentPart = tableParts[tableParts.length - 1]?.trim() || '';
-
-    console.log('[DEBUG] 콤마 분리 후 개수:', tableParts.length);
-    console.log('[DEBUG] 마지막 파티션:', tableParts[tableParts.length - 1]);
 
     // JOIN 키워드 제외 처리  
     if (currentPart.match(/^(?:INNER\s+|LEFT\s+|RIGHT\s+|OUTER\s+|FULL\s+)?JOIN\b/i)) {
@@ -65,13 +60,10 @@ export function extractTableFromFROMClause(
         key.startsWith(partialName) && key.length >= partialName.length
     );
 
-    console.log('[DEBUG] All matches for', partialName, ':', allMatches);
-
     if (allMatches.length > 0) {
         const exactMatch = allMatches.find((key: string) => key === partialName);
         const targetTableName = exactMatch || allMatches[0];
 
-        console.log('[DEBUG] ✓ Enhanced', partialName, '→', targetTableName);
         return {
             targetTableName,
             partialNameFromInput: partialName
@@ -80,7 +72,6 @@ export function extractTableFromFROMClause(
         // NEW: 메타데이터에서 찾을 수 없다면 CTE 이름 확인
         const isCtePattern = /^\(CTE:\w+\)$/.test(partialName);
         if (isCtePattern) {
-            console.log('[DEBUG] ✓ Matched CTE:', partialName);
             return {
                 targetTableName: partialName,
                 partialNameFromInput: null  // CTE 는 입력 완료 상태로 간주
@@ -88,7 +79,6 @@ export function extractTableFromFROMClause(
         }
         
         // 매칭되는 테이블 없음  
-        console.log(' No matching tables for:', partialName);
         return {
             targetTableName: partialName,
             partialNameFromInput: partialName
@@ -111,15 +101,11 @@ export function extractTableFromSelectOnly(
 
     let potentialTable: string | undefined = Object.values(aliasToTableName)[0];
     
-    console.log('[DEBUG] Extracted from alias:', potentialTable);
-
     const metaKeys = Object.keys(tableColumns || {});
     const allMatches = metaKeys.filter((key: string) => 
         key.startsWith(potentialTable?.toUpperCase() || '') && 
         (potentialTable ? key.length >= potentialTable.length : true)
     );
-
-    console.log('[DEBUG] All matches:', allMatches);
 
     if (allMatches.length > 0) {
         const exactMatch = allMatches.find((key: string) => 
@@ -128,12 +114,6 @@ export function extractTableFromSelectOnly(
         
         const targetTableName = exactMatch || allMatches[0];
         
-        console.log('[DEBUG] ✓ Selected:', targetTableName);
-        console.log('[DEBUG]   Metadata check:', { 
-            exists: !!tableColumns?.[targetTableName],  
-            columnCount: tableColumns?.[targetTableName]?.length || 0  
-        });
-
         return { 
             targetTableName, 
             partialNameFromInput: potentialTable?.toUpperCase() || null 
@@ -141,7 +121,6 @@ export function extractTableFromSelectOnly(
     } else {
         // NEW: CTE 이름 확인 (가상 테이블)
         if (potentialTable && /^\(CTE:\w+\)$/.test(potentialTable)) {
-            console.log('[DEBUG] ✓ Matched CTE:', potentialTable);
             return { 
                 targetTableName: potentialTable, 
                 partialNameFromInput: null 

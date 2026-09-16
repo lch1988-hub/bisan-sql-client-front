@@ -24,7 +24,6 @@
     "idb": "^8.0.3",
     "monaco-editor": "^0.52.2",
     "next": "16.3.3",
-    "node-sql-parser": "^5.4.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-hook-form": "^7.86.0",
@@ -34,7 +33,6 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
-    "@types/node-sql-parser": "^1.1.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "concurrently": "^10.0.5",

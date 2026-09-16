@@ -130,7 +130,6 @@ export function extractFromClause(sql: string): AliasMapping {
                 
                 if (cleanAlias && !aliasToTableName[cleanAlias]) {
                     aliasToTableName[cleanAlias] = tableName;
-                    console.log('[extractFromClause] Cleaned alias:', { raw: aliasPart, clean: cleanAlias, table: tableName });
                 }
             }
         }

@@ -94,17 +94,8 @@ export function handleSelectOnlyCompletion(
     const monacoLanguages = (window as any).monaco?.languages;
     if (!monacoLanguages) return [];
 
-    console.log('[SelectOnlyCompletion]  Processing SELECT-only clause completion:', {
-        partialNameFromInput,
-        targetTableName,
-        effectiveCurrentWord: effectiveCurrentWord || 'undefined',
-        isDotFormatWithoutTrailingDot
-    });
-
     // NEW: "X." 형식 처리 - alias 가 끝나는 점 바로 다음 (컬럼 제안 필요)
     if (effectiveCurrentWord && effectiveCurrentWord.endsWith('.')) {
-        console.log('[SelectOnlyCompletion]  Alias.dot detected:', effectiveCurrentWord);
-        
         // targetTableName 이 이미 INNER scope 에서 추출된 것인지 확인 (index.ts 로직이 처리했음)
         if (!targetTableName) {
             console.warn('[SelectOnlyCompletion] ️ No table resolved for alias in INNER scope, returning empty');
@@ -113,8 +104,6 @@ export function handleSelectOnlyCompletion(
         
         const columns = tableColumns?.[targetTableName];
         if (columns && columns.length > 0) {
-            console.log('[SelectOnlyCompletion]  Returning', columns.length, 'column suggestions from INNER scope only');
-            
             return columns.map(col => ({
                 label: col,
                  kind: monacoLanguages.CompletionItemKind.Field,
@@ -137,12 +126,6 @@ export function handleSelectOnlyCompletion(
                 col.startsWith(effectiveCurrentWord!.toUpperCase())
             );
             
-            console.log('[SelectOnlyCompletion] Single char column filter:', {
-                partialChar: effectiveCurrentWord,
-                matchedColumns: filteredCols.length,
-                samples: filteredCols.slice(0, 5)
-            });
-            
             if (filteredCols.length > 0) {
                 return filteredCols.map(col => ({
                     label: col,
@@ -160,8 +143,6 @@ export function handleSelectOnlyCompletion(
     const inputToUse = partialNameFromInput || targetTableName || '';
 
     if (inputToUse) {
-        console.log('[SelectOnlyCompletion]  SELECT-only: suggesting tables');
-
         const tableSuggestions = createSelectTableSuggestions(
             inputToUse,
             tableColumns,
@@ -169,12 +150,10 @@ export function handleSelectOnlyCompletion(
         );
 
         if (tableSuggestions.length > 0) {
-            console.log('[SelectOnlyCompletion]  Returning', tableSuggestions.length, 'table suggestions');
             return tableSuggestions;
         }
     }
 
     // Fallback: 전체 테이블 목록 + 키워드
-    console.log('[SelectOnlyCompletion] ️ No specific matches, using fallback');
     return createSelectFallbackSuggestions(tableColumns, sqlKeywords, monacoLanguages);
 }
