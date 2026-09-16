@@ -80,17 +80,17 @@ export function extractFromClause(sql: string): AliasMapping {
 
         const fromContent = fromClauseMatch[1];
         
-        // 콤마 단위로 분리하여 여러 테이블 처리 (JOIN 문법도 지원)  
-        const commaSeparatedEntries = fromContent.split(',').filter((s: string) => s.trim());
+        // 개행 + 콤마 단위로 분리 (JOIN 체인 라인별 처리, 콤마 테이블 나열 처리) (v10.41)
+        const commaSeparatedEntries = fromContent
+            .split(/\r?\n/)
+            .flatMap((line: string) => line.split(/\b(?:ON|USING)\b/i)[0].split(','))
+            .filter((s: string) => s.trim());
         
         for (const entry of commaSeparatedEntries) {
             // AS 키워드 제거  
             const cleanEntry = entry.replace(/\bAS\b/gi, '').trim();
             
-            if (!cleanEntry || ['join', 'left', 'right', 'inner', 'outer'].some(kw => 
-                cleanEntry.toLowerCase().startsWith(kw))) {
-                continue;
-            }
+            if (!cleanEntry) continue;
 
             // 테이블명과 alias 추출: "TABLE_NAME AS ALIAS" or "TABLE_NAME ALIAS"  
             const parts = cleanEntry.split(/\s+/);
@@ -98,7 +98,7 @@ export function extractFromClause(sql: string): AliasMapping {
             if (parts.length < 1 || !parts[0]) continue;
             
             // JOIN 문법 처리: "left table_name alias"  first non-JOIN keyword is table  
-            const joinKeywords = ['inner', 'left', 'right', 'outer', 'full', 'join'];
+            const joinKeywords = ['INNER', 'LEFT', 'RIGHT', 'OUTER', 'FULL', 'JOIN'];
             const firstNonJoinIndex = parts.findIndex(p => 
                 p.toUpperCase() !== 'AS' && !joinKeywords.includes(p.toUpperCase())
             );

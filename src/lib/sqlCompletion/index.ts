@@ -170,12 +170,15 @@ export function createCompletionSuggestions(
             if (fromClause && fromClause.position < (cursorOffsetInQuery || 0)) {
                 // Only use FROM clause that appears BEFORE cursor position
                 const fromTextStart = fromClause.position;
-                let fromTextEnd = fromClause.endIndex ?? currentQuery.length;
                 
-                // Find next keyword boundary to avoid including outer scope content
+                // FROM 블록 종료점: cursor 앞의 첫 non-JOIN clause 까지 (v10.41)
+                // JOIN clause들은 FROM 블록의 일부이므로 경계로 취급하지 않음
+                // (기존: endIndex가 첫 JOIN 시작점이라 JOIN 라인들이 segment에서 누락 → 모든 JOIN alias 유실)
+                let fromTextEnd = cursorOffsetInQuery || currentQuery.length;
                 for (const clause of activeScope.clauses) {
+                    if (clause.type === 'JOIN') continue;
                     if (clause.position > fromClause.position && 
-                        clause.position < cursorOffsetInQuery) {
+                        clause.position < fromTextEnd) {
                         fromTextEnd = Math.min(fromTextEnd, clause.position);
                     }
                 }
