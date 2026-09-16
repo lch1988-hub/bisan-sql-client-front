@@ -9,6 +9,7 @@
  */
 
 import type { ParsingResult } from './types';
+import { maskNonSqlText } from './sqlMasker';
 
 /**
  * 문자열 앞의 공백/탭/개행 길이 반환
@@ -169,6 +170,9 @@ export function findKeywordPosition(text: string, keyword: string): number {
  * @param cursorOffset - 커서 위치 (offset)
  */
 export function analyzeSQLClauses(fullQuery: string, cursorOffset: number = fullQuery.length): ParsingResult {
+    // 주석/문자열 리터럴 마스킹 (길이 보존) - 주석 내 키워드가 절 분석에 오염되는 것 방지
+    fullQuery = maskNonSqlText(fullQuery);
+
     // 전체 쿼리를 분석하여 모든 keyword 의 절대 위치 찾기
     const contextInfo = findKeywordsWithContext(fullQuery);
 
@@ -984,7 +988,9 @@ export function analyzeSQLClauses(fullQuery: string, cursorOffset: number = full
  * FROM 절 이후 WHERE/GROUP BY 이전에 있는 텍스트 추출
  */
 export function extractFROMClauseContent(upperText: string): string | null {
-    const fromMatch = upperText.match(/FROM\s+([\s\S]+)/i);
+    // 문자열 리터럴/주석 안의 'FROM' 등 키워드가 오염시키지 않도록 마스킹 (v10.40)
+    const masked = maskNonSqlText(upperText);
+    const fromMatch = masked.match(/FROM\s+([\s\S]+)/i);
 
     if (!fromMatch?.[1]) return null;
 

@@ -2,6 +2,8 @@
  * SQL 쿼리에서 테이블명, alias 추출 유틸리티  
  */
 
+import { maskNonSqlText } from '../sqlCompletion/sqlMasker';
+
 export interface AliasMapping {
     [alias: string]: string;  // alias -> 실제 테이블명 매핑
 }
@@ -59,6 +61,9 @@ export function parseCteDefinitions(sql: string): AliasMapping {
  * FROM 절에서 테이블명과 alias 추출 (전체 쿼리 텍스트 사용)
  */
 export function extractFromClause(sql: string): AliasMapping {
+    // 주석/문자열 리터럴 마스킹 (길이 보존) - 주석 내 키워드가 FROM 추출/절 종료점 판정에 오염되는 것 방지
+    sql = maskNonSqlText(sql);
+
     const aliasToTableName: Record<string, string> = {};
     
     // NEW: WITH 절 먼저 파싱하여 CTE 이름 추출
@@ -94,7 +99,7 @@ export function extractFromClause(sql: string): AliasMapping {
             
             // JOIN 문법 처리: "left table_name alias"  first non-JOIN keyword is table  
             const joinKeywords = ['inner', 'left', 'right', 'outer', 'full', 'join'];
-            let firstNonJoinIndex = parts.findIndex(p => 
+            const firstNonJoinIndex = parts.findIndex(p => 
                 p.toUpperCase() !== 'AS' && !joinKeywords.includes(p.toUpperCase())
             );
             
@@ -104,7 +109,7 @@ export function extractFromClause(sql: string): AliasMapping {
             }
             
             // 테이블명 추출  
-            let tableName = parts[firstNonJoinIndex].toUpperCase().replace(/[^A-Z0-9_]/g, '');
+            const tableName = parts[firstNonJoinIndex].toUpperCase().replace(/[^A-Z0-9_]/g, '');
             
             if (!tableName) continue;
             
