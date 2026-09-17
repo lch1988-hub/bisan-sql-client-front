@@ -1,13 +1,10 @@
 import { create } from 'zustand';
-import { persist, type StorageValue, type StateStorage } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
 import { COMMAND_TYPE, type CommandTypeValue } from '../constants/commandTypes';
 import { ParsedSelectData } from "../schemas/formSchema";
 import { 
   saveQueryResult, 
   restoreQueryResult, 
-  saveTabMetadata, 
-  restoreTabMetadata,
-  clearExpiredData,
   clearQueryResult  // IndexedDB 에서 탭 데이터 삭제 추가
 } from '@/lib/storage';
 
@@ -83,16 +80,16 @@ export const useTabsStore = create<TabsState>()(
                     // localStorage 는 SQL 커밋문만 보존하고 data(쿼리 결과) 는 IndexedDB 에서 복원
                     const stored = localStorage.getItem('sql-tabs-storage');
                     if (stored) {
-                        const parsed = JSON.parse(stored);
+                        const parsed: { tabs?: Array<Partial<TabData>> } = JSON.parse(stored);
                         if (Array.isArray(parsed.tabs)) {
-                            initialTabs = parsed.tabs.map((t: any) => ({
+                            initialTabs = parsed.tabs.map((t) => ({
                                 ...t,
                                 cmdType: t.cmdType === 'execute' ? COMMAND_TYPE.EXECUTE : 
                                         t.cmdType === 'procedure' ? COMMAND_TYPE.PROCEDURE : 
                                         COMMAND_TYPE.SELECT,
                                 // data 필드는 IndexedDB 에서 복원 (초기 null)
                                 data: undefined,
-                            }));
+                            })) as TabData[];
                         }
                     }
                 } catch (e) {
@@ -105,7 +102,6 @@ export const useTabsStore = create<TabsState>()(
                 initialTabs = [createDefaultTab(DEFAULT_TAB_ID)];
             } else {
                 // 기존 탭 복원 - data 필드는 IndexedDB 에서 비동기로 복원
-                console.log(`저장된 탭 ${initialTabs.length}개 발견, IndexedDB 에서 데이터 복원 중...`);
                 
                 // 각 탭의 쿼리 결과를 백그라운드에서 복원
                 initialTabs.forEach(async (tab) => {
@@ -113,9 +109,6 @@ export const useTabsStore = create<TabsState>()(
                     
                     if (cachedData) {
                         updateTabInternal(tab.id, { data: cachedData });
-                        console.log(`탭 [${tab.name}] 쿼리 결과 복원 완료 (${cachedData.rows?.length || 0}행)`);
-                    } else {
-                        console.log(`탭 [${tab.name}] 에 저장된 결과가 없습니다`);
                     }
                 });
                 
@@ -136,13 +129,7 @@ export const useTabsStore = create<TabsState>()(
                 
                 addTab: () => {
                     set((state) => {
-                        const activeData = state.tabs.find(tabData => tabData.id === state.activeTabId);
-
-                        console.log('새 탭 생성 전 활성 탭 데이터:', activeData);
-                        
                         const newTab = createDefaultTab();  // 항상 기본값 생성
-                        
-                        console.log('새로 생성된 탭:', newTab);
                         
                         return {
                             tabs: [...state.tabs, newTab],
@@ -218,16 +205,9 @@ export const useTabsStore = create<TabsState>()(
                     // data 가 업데이트되면 lastUpdated 타임스탬프도 갱신
                     if ('data' in filteredUpdates && filteredUpdates.data !== undefined) {
                         filteredUpdates.lastUpdated = Date.now();
-                        
-                        const row_count = filteredUpdates.data.rows?.length || 0;
-                        
-                        console.log('데이터 크기:', row_count, '건');
 
                         // rows 는 항상 전체 저장 (UI 에 즉시 표시)
                         // total_count 만 기록
-                        if (row_count > 200) {
-                            console.log(`대용량 (${row_count}건), UI 에 전체 표시`);
-                        }
                         // 51-200 행도 그대로 유지
                     }
 
@@ -315,10 +295,6 @@ async function syncToIndexedDB(id: string, updates: Partial<TabData>) {
         // data 는 50 행 이상이면 localStorage 에서 이미 필터링됨 (rows 가 []) 
         // 실제 전체 데이터는 IndexedDB 에 저장
         await saveQueryResult(id, updates.data);
-        
-        const displayRowCount = updates.data.rows?.length || tab.data?.total_count || 0;
-        console.log(`IndexedDB 동기화 완료: [${tab.name}]`, displayRowCount, '행');
-
     } catch (error) {
         console.error('IndexedDB 동기화 실패:', error);
     }

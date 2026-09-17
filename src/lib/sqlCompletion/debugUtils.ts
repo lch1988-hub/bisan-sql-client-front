@@ -3,15 +3,6 @@
  * Debug logging 전용 모듈 (프로덕션에서는 비활성화 가능)
  */
 
-interface NestedContextInfo {
-    isNested: boolean;
-    currentSelectInfo?: {
-        pos: number;
-        depth: number;
-        selectText: string;
-    } | null;
-}
-
 /**
  * 현재 parentheses 깊이 계산 (옵션: 커서 위치까지만 계산)
  */
@@ -43,7 +34,7 @@ export function findSelectPositions(text: string, cursorOffset?: number): Array<
     
     for (let idx = 0; idx < upperText.length - 6; idx++) {
         if (/SELECT\b/.test(upperText.substring(idx))) {
-            let depthAtSelect = calculateParenDepth(textToAnalyze, idx);
+            const depthAtSelect = calculateParenDepth(textToAnalyze, idx);
             selectPositions.push({ 
                 pos: idx, 
                 depth: depthAtSelect 

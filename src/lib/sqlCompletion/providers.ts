@@ -3,6 +3,7 @@
  */
 
 import { createCompletionSuggestions as internalCreateSuggestions } from './index';
+import type { MonacoPosition, MonacoWord, CompletionItem } from './types';
 
 // 전역 상수 제거 - 모든 함수 내부에서 실행 시점에 가져옴
 
@@ -11,15 +12,12 @@ import { createCompletionSuggestions as internalCreateSuggestions } from './inde
  */
 export function createCompletionSuggestions(
     modelValue: string,        
-    position: any,             
-    word: any,                 
+    position: MonacoPosition,             
+    word: MonacoWord,                 
     sqlKeywords: string[],     
     tableColumns?: Record<string, string[]>  
-): any[] {
-    // MONACO 객체를 window 에서 안전하게 가져옴 (함수 실행 시점에)
-    const monacoInstance = (window as any).monaco;
-    
-    return internalCreateSuggestions(modelValue, position, word, sqlKeywords, tableColumns, monacoInstance);
+): CompletionItem[] {
+    return internalCreateSuggestions(modelValue, position, word, sqlKeywords, tableColumns);
 }
 
 /**
@@ -52,11 +50,11 @@ export function setupMonacoSQLCompletion(monaco: any) {
                 position,           
                 word,               
                 sqlKeywords,  
-                (window as any).sqlTableColumns || {}
+                window.sqlTableColumns || {}
             );
 
             return {
-                suggestions: suggestions.map((suggestion: any) => ({  
+                suggestions: suggestions.map((suggestion) => ({  
                     ...suggestion,
                     range,
                 }))  
@@ -74,7 +72,7 @@ export function setupMonacoSQLCompletion(monaco: any) {
  * Monaco 에 SQL 언어 설정 적용
  */  
 export function setupSQLLanguage(monaco: any): boolean {
-    if ((window as any).sqlConfigured) return false;
+    if (window.sqlConfigured) return false;
 
     monaco.languages.register({ id: 'sql' });
 
@@ -112,7 +110,7 @@ export function setupSQLLanguage(monaco: any): boolean {
         }  
     });
 
-    (window as any).sqlConfigured = true;  
+    window.sqlConfigured = true;  
     
     return true;  
 }

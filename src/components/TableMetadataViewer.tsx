@@ -19,8 +19,8 @@ export default function TableMetadataViewer() {
         }
     };
 
-    const handleRowClick = (row: any) => {
-        if (row.TABLE_NAME) {
+    const handleRowClick = (row: Record<string, string | number | null>) => {
+        if (typeof row.TABLE_NAME === 'string' && row.TABLE_NAME) {
             setSelectedTable(row.TABLE_NAME);
         } else {
             console.error('[handleRowClick] TABLE_NAME 이 없음:', row);

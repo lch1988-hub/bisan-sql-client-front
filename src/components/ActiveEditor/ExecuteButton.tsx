@@ -4,7 +4,6 @@ import React from 'react';
 import { useFormContext } from 'react-hook-form';
 import { COMMAND_TYPE, type CommandTypeValue } from '@/constants/commandTypes';
 import { useTabsStore } from '@/stores/tabsStore';
-import { extractCurrentQuery } from '@/utils/sqlUtils';
 import { useQueryExecution } from '@/hooks/useQueryExecution';
 
 interface ExecuteButtonProps {
@@ -26,17 +25,9 @@ export const ExecuteButton: React.FC<ExecuteButtonProps> = ({
     const handleSubmit = (e: React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
         
-        console.log('[ExecuteButton] 클릭됨');
-        
         const formSql = getValues().sql;
         const tabSql = activeTabId ? useTabsStore.getState().getActiveTab()?.sql : '';
         const currentSql = formSql || tabSql;
-        
-        console.log('[ExecuteButton] SQL 값:', { 
-            formSql: formSql?.substring(0, 50), 
-            tabSql: tabSql?.substring(0, 50),
-            finalSql: currentSql?.substring(0, 100)
-        });
         
         if (!currentSql || currentSql.trim() === '') {
             alert('SQL 쿼리를 입력해주세요!');
@@ -45,11 +36,6 @@ export const ExecuteButton: React.FC<ExecuteButtonProps> = ({
         
         // 전체 SQL 을 실행 (버튼 클릭 시에는 전체 실행)
         const safeCmdType = watch('cmdType') as CommandTypeValue || COMMAND_TYPE.SELECT;
-        
-        console.log('[ExecuteButton] 실행:', { 
-            cmdType: safeCmdType, 
-            sqlLength: currentSql.length 
-        });
 
         mutation.mutate({
             sql: currentSql,
@@ -58,8 +44,6 @@ export const ExecuteButton: React.FC<ExecuteButtonProps> = ({
             fromPos: 0,
             toPos: 1,
         });
-        
-        console.log('[ExecuteButton] mutation 호출 완료');
     };
 
     return (

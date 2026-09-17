@@ -12,25 +12,12 @@ interface RunAllToggleProps {
  * 전체 실행 체크박스 컴포넌트
  */
 export const RunAllToggle: React.FC<RunAllToggleProps> = ({ activeTabId }) => {
-    const { register, watch } = useFormContext();
+    const { register } = useFormContext();
     const updateTab = useTabsStore((state) => state.updateTab);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        console.log(' [Checkbox Change] 전체실행 변경:', e.target.checked);
-        
         if (activeTabId) {
             updateTab(activeTabId, { executeAll: e.target.checked });
-            console.log('|  store 업데이트 완료:', { tabId: activeTabId, newExecuteAll: e.target.checked });
-            
-            setTimeout(() => {
-                const currentState = useTabsStore.getState();
-                const currentTab = currentState.tabs.find(t => t.id === activeTabId);
-                console.log('| 저장된 상태 확인:', { 
-                    tabId: activeTabId, 
-                    storeExecuteAll: currentTab?.executeAll, 
-                    sameAsInput: currentTab?.executeAll === e.target.checked 
-                });
-            }, 50);
         }
     };
 

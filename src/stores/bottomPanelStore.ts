@@ -71,7 +71,6 @@ export function useInitializePanelHeight() {
         const savedState = parsed?.state;
         
         if (savedState && typeof savedState.height === 'number') {
-          console.log(`[BottomPanel] 저장된 높이 (${savedState.height}px) 복원`);
           useBottomPanelStore.getState().setHeight(savedState.height);
           return; // 저장된 값 있으면 사용 중지
         }

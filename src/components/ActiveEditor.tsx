@@ -1,17 +1,17 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { useForm, Controller, FormProvider, useFormState } from 'react-hook-form';
+import { useForm, Controller, FormProvider } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { extractCurrentQuery } from '@/utils/sqlUtils';
-import { COMMAND_TYPE, type CommandTypeValue } from '@/constants/commandTypes';
+import { COMMAND_TYPE } from '@/constants/commandTypes';
 import { useTabsStore } from '@/stores/tabsStore';
 import {CommandTypeSelector} from './ActiveEditor/CommandTypeSelector';
 import { RunAllToggle } from './ActiveEditor/RunAllToggle';
 import { PaginationInput } from './ActiveEditor/PaginationInput';
 import { ExecuteButton } from './ActiveEditor/ExecuteButton';
 import SQLMonacoEditor from './editor/SQLMonacoEditor';
-import {FormValues, ApiResponse} from '@/schemas/formSchema';
+import { FormValues } from '@/schemas/formSchema';
 import { formSchema} from '@/schemas/formSchema';
 
 // Custom Hooks
@@ -47,7 +47,7 @@ export const ActiveEditor: React.FC = () => {
   };
 
   // 커서 위치 상태
-  const [cursorPosition, setCursorPosition] = useState(0);
+  const [, setCursorPosition] = useState(0);
   
   // SQL 자동완성 및 저장 관련 state
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -58,18 +58,9 @@ export const ActiveEditor: React.FC = () => {
   const isRestoringRef = useRef(false);
 
   // Custom Hooks 사용 (hasMounted 체크 제거)
-  const { mutation, executeQuery } = useQueryExecution(activeTabId ?? undefined);
-  // restoreCursorPosition は handleEditorMountComplete で直接実装したため不要にしました
-  const { forceSync: syncMetadata } = useMetadataSync({ loggerPrefix: '[ActiveEditor]' });
-
-  // FROM 테이블 추출 유틸리티 함수
-  const extractFromTable = useCallback((sql: string): string => {
-      const matches = sql.match(/FROM\s+([a-zA-Z_][a-zA-Z0-9_]*)/gi);
-      if (!matches || matches.length === 0) return '';
-      const lastMatch = matches[matches.length - 1];
-      const match = lastMatch.match(/FROM\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
-      return (match && match[1]) ? match[1].toUpperCase() : '';
-  }, []);
+  const { executeQuery } = useQueryExecution(activeTabId ?? undefined);
+  // 메타데이터 동기화는 useMetadataSync 훅이 단일 책임 (대문자 정규화 포함)
+  useMetadataSync();
 
   // 탭 전환 시 form 상태 동기화
   useEffect(() => {
@@ -92,15 +83,12 @@ export const ActiveEditor: React.FC = () => {
 
     // 즉시 form 동기화 - store 의 최신 값 사용
     syncFormData();
-    console.log('[Form Sync] activeTab:', { id: activeTab?.id, sqlLen: activeTab?.sql?.length });
 
   }, [hasMounted, activeTab?.id]);
 
   // 에디터에서 온 mount 완료 콜백 - store 를 직접 읽어서 최신 상태 사용
 const handleEditorMountComplete = useCallback((editor: any) => {
   if (!editor || !editor.getModel()) return;
-
-  console.log('[ Mount] handleEditorMountComplete 호출됨');
 
   const currentActiveTab = useTabsStore.getState().getActiveTab();
   if (currentActiveTab) restoreCursorPositionInEditor(editor, currentActiveTab);
@@ -111,20 +99,13 @@ const restoreCursorPositionInEditor = useCallback((editor: any, targetTab: {id: 
   if (!editor || !editor.getModel()) return;
 
   // **복원 중 플래그 체크 (이중 차단)**
-  console.log('[ Restore] 시작 - targetTab:', targetTab.id, 'cursorPosition:', targetTab.cursorPosition);
-
   if (isRestoringRef.current) {
-    console.log('[Skip] isRestoringRef 로 복원 중, skip');
     editor.focus();
     return;
   }
 
-  console.log('[handleEditorMountComplete] Store 탭:', targetTab.id, 'savedCursorPos:', targetTab.cursorPosition);
-
-
   // lock 체크 - 매우 빠르게 해제 (타이밍 충돌 방지)
   if (editor._restoringFlag) {
-    console.log('[handleEditorMountComplete] 이미 복원 중 (skip)');
     editor.focus();
     return;
   }
@@ -135,13 +116,7 @@ const restoreCursorPositionInEditor = useCallback((editor: any, targetTab: {id: 
   const savedCursorPos = targetTab.cursorPosition ?? 0;
   const sqlLength = (targetTab.sql || '').length;
 
-  console.log('[handleEditorMountComplete] 복원 시도:', {
-    savedCursorPos,
-    sqlLength,
-    canRestore: savedCursorPos > 0 && savedCursorPos <= sqlLength
-  });
-
-  const monacoRef = (window as any).monacoInstanceRef;
+  const monacoRef = window.monacoInstanceRef;
   if (!monacoRef?.editor) {
     editor._restoringFlag = false;
     editor.focus();
@@ -154,83 +129,55 @@ const restoreCursorPositionInEditor = useCallback((editor: any, targetTab: {id: 
       monacoRef.editor.setPosition(position);
       monacoRef.editor.revealLineInCenter(position.lineNumber);
       monacoRef.editor.focus();
-
-      console.log('[handleEditorMountComplete]  커서 복원 완료:', position.lineNumber, ':', position.column);
     } else {
       monacoRef.editor.setPosition({ lineNumber: 1, column: 1 });
       if (sqlLength > 0) {
         monacoRef.editor.revealLineInCenter(1);
       }
       monacoRef.editor.focus();
-
-      console.log('[handleEditorMountComplete] ℹ️ 첫번째 라인으로 이동');
     }
   } catch (e) {
     try {
       monacoRef.editor.setPosition({ lineNumber: 1, column: 1 });
       monacoRef.editor.focus();
-      console.log('[handleEditorMountComplete] ️ 에러로 처음으로 복원');
-    } catch (fallbackErr) {
+    } catch {
       console.error('Fallback failed:', e);
     }
   } finally {
     setTimeout(() => {
       editor._restoringFlag = false;
       isRestoringRef.current = false;
-      console.log('[handleEditorMountComplete] Lock 해제 (isRestoringRef=false)');
     }, 16);
   }
 }, []);
 
 // TabBar 에서 탭 전환 후 에디터 포커스를 줌 (복원 후 사용자 클릭 가능하게)
-    useEffect(() => {
-        if (!hasMounted || !activeTab?.id) return;
+useEffect(() => {
+    if (!hasMounted || !activeTab?.id) return;
 
-        console.log('[🟠 Effect] activeTab 변경 감지: ', activeTab.id);
+    const timer = setTimeout(() => {
+        const editor = window.monacoInstanceRef?.editor;
 
-        const timer = setTimeout(() => {
-            const editor = (window as any).monacoInstanceRef?.editor;
+        if (!editor) return;
 
-            if (!editor) {
-                console.log('[ Skip] editor 가 아직 초기화되지 않음');
-                return;
+        // store 에서 최신 상태 확인 - 중복 복원 제거
+        const latestTab = useTabsStore.getState().getActiveTab();
+
+        // onMountComplete 에서 했으므로 여기선 skip
+        // 단, onMountComplete 가 호출되지 않은 경우만을 대비해서 유지
+        if (!editor._restoringFlag && !isRestoringRef.current) {
+            // latestTab 이 null 이 아닌지 체크
+            if (latestTab) {
+                restoreCursorPositionInEditor(editor, latestTab);
+
+                // 복원 완료 후 포커스 설정 (사용자가 인지할 시간을 줌)
+                setTimeout(() => editor.focus(), 200);
             }
+        }
+    }, 50);
 
-            console.log('[🟡 Effect] 50ms 후 editor 확인, 복원 확인 - tab id:', activeTab?.id);
-
-            // store 에서 최신 상태 확인 - 중복 복원 제거
-            const latestTab = useTabsStore.getState().getActiveTab();
-
-            console.log('[ Store 상태] 탭 ID:', latestTab?.id,
-                      'cursorPosition:', latestTab?.cursorPosition,
-                    'sqlLength:', (latestTab?.sql || '').length );
-
-            // onMountComplete 에서 했으므로 여기선 skip
-            // 단, onMountComplete 가 호출되지 않은 경우만을 대비해서 유지
-            console.log('[ 플래크 체크] editor._restoringFlag:', !!editor._restoringFlag,
-                      'isRestoringRef.current:', isRestoringRef.current);
-
-            if (!editor._restoringFlag && !isRestoringRef.current) {
-                console.log('[🟢 복원 시도] Effect 에서 복구 시작');
-
-                // latestTab 이 null 이 아닌지 체크
-                if (latestTab) {
-                    restoreCursorPositionInEditor(editor, latestTab);
-
-                    // 복원 완료 후 포커스 설정 (사용자가 인지할 시간을 줌)
-                    setTimeout(() => editor.focus(), 200);
-                    console.log('[ Effect] 복원 완료 및 포커스 설정 예정');
-                } else {
-                    console.log('[ Skip] latestTab 이 null 이므로 skip');
-                }
-            } else {
-                console.log('[ Skip] 복원 중, skip (flag=', editor._restoringFlag, ',',
-                           'isRestoring=', isRestoringRef.current ,')');
-            }
-        }, 50);
-
-        return () => clearTimeout(timer);
-    }, [hasMounted, activeTab?.id]);
+    return () => clearTimeout(timer);
+}, [hasMounted, activeTab?.id]);
 
 
   // Form 초기화
@@ -282,7 +229,7 @@ const form = useForm<FormValues>({
                                         }
 
                                         saveTimeoutRef.current = setTimeout(() => {
-                                            const monacoRef = (window as any).monacoInstanceRef;
+                                            const monacoRef = window.monacoInstanceRef;
 
                                             // 현재 SQL 과 커서 위치를 한 번에 저장
                                             if (activeTab?.id) {
@@ -314,9 +261,6 @@ const form = useForm<FormValues>({
                                     onCursorChange={(offset) => {
                                         const currentTab = useTabsStore.getState().getActiveTab();
                                         
-                                        console.log('[ Cursor Change] onCursorChange 호출, offset=', offset,
-                                                  'tab ID (store 직접 읽음):', currentTab?.id);
-                                        
                                         if (!currentTab?.id) return;
                                         setCursorPosition(offset);
                                         
@@ -330,8 +274,6 @@ const form = useForm<FormValues>({
                                             
                                             if (!latestTab?.id) return;
                                             
-                                            console.log('[ Store Update] debounce 완료, commit: offset=', offset,
-                                                      'tab ID:', latestTab.id);
                                             updateTab(latestTab.id, { 
                                                 cursorPosition: offset
                                             });

@@ -49,7 +49,7 @@ export function getCurrentSelect(selectPositions: Array<{ pos: number; depth: nu
     return sameDepthSelects.sort((a, b) => b.pos - a.pos)[0];
 }
 
-export function extractSelectSegment(fullText: string, selectPos: number, cursorPos: number): string {
+export function extractSelectSegment(fullText: string, selectPos: number): string {
     // FULL 텍스트 사용 (cursorPosition 제한 없이 끝까지 추출 후 WHERE 또는 ) 에서 잘라내기)
     let segment = fullText.substring(selectPos);
 
@@ -82,7 +82,7 @@ export function analyzeScope(queryText: string, cursorOffset: number): ScopeInfo
     
     let currentSelectSegment: string | null = null;
     if (currentSelect) {
-        currentSelectSegment = extractSelectSegment(queryText, currentSelect.pos, cursorOffset);
+        currentSelectSegment = extractSelectSegment(queryText, currentSelect.pos);
     }
     
     return {

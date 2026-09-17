@@ -5,6 +5,7 @@
 
 import { getQueryAtCursor, monacoPositionToOffset } from '../sqlQueryParser/index';
 import type { QueryAtCursorResult } from '../sqlQueryParser/types';
+import type { MonacoPosition } from './types';
 
 export interface ParsedContext {
     queryAtCursor: QueryAtCursorResult;
@@ -16,7 +17,7 @@ export interface ParsedContext {
  */
 export function parseQueryContext(
     modelValue: string,
-    position: any
+    position: MonacoPosition
 ): ParsedContext | null {
     const cursorOffset = monacoPositionToOffset(modelValue, position);
     

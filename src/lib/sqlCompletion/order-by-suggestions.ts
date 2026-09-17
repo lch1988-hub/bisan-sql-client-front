@@ -7,7 +7,7 @@
  * - ASC/DESC 키워드 포함
  */
 
-import type { TableColumns, CompletionItem } from './types';
+import type { TableColumns, CompletionItem, MonacoLanguages } from './types';
 
 /**
  * ORDER BY 에서 컬럼 자동완성 제언 생성
@@ -17,8 +17,7 @@ export function createOrderByColumnSuggestions(
     tableName: string | null,
     columns: string[],
     currentWordUpper: string,
-    monacoLanguages: any,
-    isPrefixedByAlias: boolean = false  // alias.column 형식인지 여부
+    monacoLanguages: MonacoLanguages
 ): CompletionItem[] {
     if (!currentWordUpper || currentWordUpper.length <= 1) {
         const suggestions = columns.slice(0, 50).map(col => ({
@@ -74,7 +73,7 @@ export function createOrderByColumnSuggestions(
 export function createOrderByTableSuggestions(
     partialName: string,
     tableColumns: TableColumns | undefined,
-    monacoLanguages: any
+    monacoLanguages: MonacoLanguages
 ): CompletionItem[] {
     if (!partialName) return [];
 
@@ -101,7 +100,7 @@ export function createOrderByTableSuggestions(
 export function createOrderByFallbackSuggestions(
     tableColumns: TableColumns | undefined,
     sqlKeywords: string[],
-    monacoLanguages: any
+    monacoLanguages: MonacoLanguages
 ): CompletionItem[] {
     if (!tableColumns) return [];
 
@@ -167,7 +166,7 @@ export function handleOrderByCompletion(
     aliasToTableName?: Record<string, string>,
     effectiveCurrentWord?: string  // "X." 처리를 위한 추가 파라미터
 ): CompletionItem[] {
-    const monacoLanguages = (window as any).monaco?.languages;
+    const monacoLanguages = window.monaco?.languages;
     if (!monacoLanguages) return [];
 
     // Case 1: "alias." 형식 처리 - SELECT 절에 이미 있는 컬럼들 제안
@@ -182,8 +181,7 @@ export function handleOrderByCompletion(
                     targetTableName,
                     columns,
                     '',
-                    monacoLanguages,
-                    true  // isPrefixedByAlias
+                    monacoLanguages
                 );
             } else {
                 console.warn('[OrderByCompletion] No columns found for', targetTableName);
@@ -200,8 +198,7 @@ export function handleOrderByCompletion(
                     resolvedTable,
                     columns,
                     '',
-                    monacoLanguages,
-                    true
+                    monacoLanguages
                 );
             }
         } else {
@@ -234,8 +231,7 @@ export function handleOrderByCompletion(
                     inputToUse,
                     suggestedColumns.slice(0, 50),
                     '',
-                    monacoLanguages,
-                    false
+                    monacoLanguages
                 );
             }
         } else {

@@ -39,11 +39,35 @@ export interface TableExtractResult {
 }
 
 /**
+ * Monaco 커서 위치 (最小 구조)
+ */
+export interface MonacoPosition {
+    lineNumber: number;
+    column: number;
+}
+
+/**
+ * Monaco 단어 정보 (最小 구조 - wordExtractor 에서 사용)
+ */
+export interface MonacoWord {
+    word?: string;
+    startColumn?: number;
+    endColumn?: number;
+}
+
+/**
+ * Monaco languages 네임스페이스 (CompletionItemKind 만 사용)
+ */
+export interface MonacoLanguages {
+    CompletionItemKind: Record<string, number>;
+}
+
+/**
  * Monaco 자동완성 제언 항목 타입
  */
 export interface CompletionItem {
     label: string;
-    kind: any;
+    kind: number;  // CompletionItemKind 값 (number)
     insertText: string;
     detail?: string;
     documentation?: string;

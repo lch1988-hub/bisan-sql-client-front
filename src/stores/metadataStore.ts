@@ -58,19 +58,16 @@ export const useMetadataStore = create<MetadataState>()(
       lastUpdated: null,
       
       fetchMetadata: async () => {
-        console.log(' [metadataStore] fetchMetadata 호출됨');
         set({ loading: true, error: null });
         
         try {
           const response = await axios.get<MetadataApiResponse>(getApiUrl('/api/table-metadata'));
-          console.log(' [metadataStore] API 응답:', response.data);
           
           if (!response.data.success) {
             throw new Error(response.data.message || '메타데이터 조회 실패');
           }
           
           const data = response.data.data;
-          console.log(' [metadataStore] 테이블 개수:', data?.totalCount, ', 전체 컬럼 개수:', data?.totalColumns);
           
           set({
             tables: data?.tables || [],
@@ -111,15 +108,14 @@ export const useMetadataStore = create<MetadataState>()(
         columnsByTable: state.columnsByTable,
         lastUpdated: state.lastUpdated,
       }),
-      migrate: (persistedState: any, version: number) => {
+      migrate: (persistedState: unknown, version: number) => {
         if (!persistedState) return {};
         
         if (version === 1) {
-          console.log(' [metadataStore] 로컬스토리지 마이그레이션: v1 → v2. 기존 데이터 제거.');
           return {};
         }
         
-        return persistedState;
+        return persistedState as Partial<MetadataState>;
       },
     }
   )

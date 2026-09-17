@@ -2,8 +2,6 @@
 
 import React, { useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { useMetadataStore } from "@/stores/metadataStore";
-import type { TableColumns } from '@/lib/sqlCompletion/types';
 import { setupMonacoSQLCompletion, setupSQLLanguage } from '@/lib/sqlCompletion/providers';
 
 // Dynamic import with SSR disabled - CRITICAL for Next.js
@@ -24,7 +22,6 @@ interface SQLMonacoEditorProps {
   onChange?: (value: string) => void;
   height?: string | number;
   onCursorChange?: (position: number) => void;
-  onScroll?: () => void;
   readOnly?: boolean;
   onSubmit?: (selectedText: string | null, selectionStart: number, selectionEnd: number) => void;
   onMountComplete?: (editor: any) => void;  // Mount 완료 시 호출될 콜백 추가
@@ -35,7 +32,6 @@ export default function SQLMonacoEditor({
   onChange,
   height = '100%',
   onCursorChange,
-  onScroll,
   readOnly = false,
   onSubmit,
   onMountComplete,
@@ -76,14 +72,11 @@ export default function SQLMonacoEditor({
 
     // 전역 변수로 저장하여 ActiveEditor 에서 참조 가능하게 함
     if (typeof window !== 'undefined') {
-      (window as any).monacoInstanceRef = { editor, monaco };
+      window.monacoInstanceRef = { editor, monaco };
     }
 
-    // Monaco 에 메타데이터 바인딩
-    syncMetadataWithMonaco();
-
     // 커서 위치 실시간 추적
-    editor.onDidChangeCursorPosition((e: any) => {
+    editor.onDidChangeCursorPosition((e: { position: { lineNumber: number; column: number } }) => {
       const offset = editor.getModel().getOffsetAt(e.position);
       
       // ⭐ 복원 중이면 store 업데이트 skip!
@@ -147,35 +140,9 @@ export default function SQLMonacoEditor({
   };
 
 
-  // 메타데이터 동기화
-  const syncMetadataWithMonaco = () => {
-    try {
-      const tables = useMetadataStore.getState().tables;
-      const columnsByTable = useMetadataStore.getState().columnsByTable;
-      
-      if (!tables || tables.length === 0) return;
-
-      // 테이블 이름 목록 추출
-      const tableNames = tables.map(t => t.TABLE_NAME);
-      
-      // sqlTableColumns 구조: { users: ['id', 'name'], products: [...] }
-      const tableColumns: TableColumns = {};
-      tables.forEach((table: { TABLE_NAME: string }) => {
-        const tableName = table.TABLE_NAME;
-        const columns = columnsByTable[tableName]?.map((col: { COLUMN_NAME: string, COLUMNS_COMMENTS: string }) => col.COLUMN_NAME) || [];
-        
-        if (columns.length > 0) {
-          tableColumns[tableName] = columns.filter(Boolean);
-        }
-      });
-
-      // Monaco 가 참조하는 전역 변수 설정
-      (window as any).sqlAutoCompleteKeywords = tableNames;
-      (window as any).sqlTableColumns = tableColumns;
-    } catch (err) {
-      console.error('Monaco metadata binding failed:', err);
-    }
-  };
+  // 메타데이터 동기화는 useMetadataSync 훅이 단일 책임으로 담당 (ActiveEditor 경유)
+  // 중복 제거: 이전에는 여기서 window.sqlAutoCompleteKeywords/sqlTableColumns 를
+  // raw 테이블명으로 다시 설정해 useMetadataSync(대문자 정규화) 와 경합을 일으켰음.
 
   // Handle editor options update
   useEffect(() => {

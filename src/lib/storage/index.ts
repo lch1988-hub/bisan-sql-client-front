@@ -6,6 +6,7 @@
 'use client';
 
 import { openDB, IDBPDatabase } from 'idb';
+import type { ParsedSelectData } from '@/schemas/formSchema';
 
 let db: IDBPDatabase | null = null;
 
@@ -22,7 +23,7 @@ async function initDB(): Promise<IDBPDatabase> {
   if (db) return db;
 
   db = await openDB(DB_NAME, DB_VERSION, {
-    upgrade(currentDb, oldVersion, newVersion, transaction) {
+    upgrade(currentDb) {
       // Query results store - 대용량 결과를 위한 저장소
       if (!currentDb.objectStoreNames.contains(RESULTS_STORE)) {
         const resultStore = currentDb.createObjectStore(RESULTS_STORE, {
@@ -41,7 +42,6 @@ async function initDB(): Promise<IDBPDatabase> {
     },
   });
 
-  console.log(' IndexedDB initialized:', DB_NAME);
   return db;
 }
 
@@ -52,7 +52,7 @@ async function initDB(): Promise<IDBPDatabase> {
 export interface CachedResult {
   id: string; // tabId + queryKey 조합
   tabId: string;
-  data: any; // ParsedSelectData 전체 객체
+  data: ParsedSelectData; // ParsedSelectData 전체 객체
   timestamp: number;
   rowCount: number;
 }
@@ -62,7 +62,7 @@ export interface CachedResult {
  */
 export async function saveQueryResult(
   tabId: string,
-  data: any,
+  data: ParsedSelectData,
   queryKey?: string
 ): Promise<void> {
   try {
@@ -77,8 +77,6 @@ export async function saveQueryResult(
       timestamp: Date.now(),
       rowCount,
     });
-
-    console.log(`IndexedDB 저장 완료 [${tabId}]: ${rowCount} rows`);
   } catch (error) {
     console.error('IndexedDB 저장 실패:', error);
     throw error;
@@ -89,7 +87,7 @@ export async function saveQueryResult(
  * 저장된 쿼리 결과 복원 (대용량 데이터 처리)
  * 50 행 이상이면 columns 만 복원, rows 는 빈 배열로 (기존 로직 유지)
  */
-export async function restoreQueryResult(tabId: string): Promise<any | null> {
+export async function restoreQueryResult(tabId: string): Promise<ParsedSelectData | null> {
   try {
     const resultDb = await initDB();
     
@@ -146,8 +144,6 @@ export async function saveTabMetadata(metadata: CachedTabMetadata): Promise<void
       ...metadata,
       timestamp: Date.now(),
     });
-
-    console.log(`탭 메타데이터 저장: ${metadata.tabId}`);
   } catch (error) {
     console.error('탭 메타데이터 저장 실패:', error);
   }
@@ -184,11 +180,6 @@ export async function clearQueryResult(tabId: string): Promise<void> {
     
     for (const result of tabResults) {
       await resultDb.delete(RESULTS_STORE, result.id);
-      console.log(`탭 결과 삭제 완료: ${result.id}`);
-    }
-    
-    if (tabResults.length > 0) {
-      console.log(`탭 [${tabId}] 의 IndexedDB 에서 ${tabResults.length}개의 결과 삭제됨`);
     }
   } catch (error) {
     console.error('쿼리 결과 삭제 실패:', error);
@@ -210,7 +201,6 @@ export async function clearExpiredData(daysToKeep: number = 7): Promise<void> {
     for (const result of oldResults) {
       if (result.timestamp < cutoffDate) {
         await resultDb.delete(RESULTS_STORE, result.id);
-        console.log(`오래된 결과 삭제: ${result.tabId}`);
       }
     }
 
@@ -220,11 +210,8 @@ export async function clearExpiredData(daysToKeep: number = 7): Promise<void> {
     for (const tab of oldTabs) {
       if (tab.timestamp < cutoffDate) {
         await resultDb.delete(TABS_CACHE_STORE, tab.tabId);
-        console.log(`오래된 탭 메타데이터 삭제: ${tab.tabId}`);
       }
     }
-
-    console.log('오래된 데이터 정리 완료');
   } catch (error) {
     console.error('오래된 데이터 정리 실패:', error);
   }
@@ -239,7 +226,6 @@ export async function clearAllResults(): Promise<void> {
     
     // 결과를 먼저 지움 (트랜잭션 순서 중요)
     await dbInstance.clear(RESULTS_STORE);
-    console.log('모든 쿼리 결과 삭제 완료');
   } catch (error) {
     console.error('데이터 삭제 실패:', error);
   }

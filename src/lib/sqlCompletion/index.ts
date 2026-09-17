@@ -4,24 +4,22 @@
  */
 
 import { extractFromClause } from '../sqlContextAnalyzer/contextExtractor';
-import type { TableColumns, CompletionItem } from './types';
+import type { TableColumns, CompletionItem, MonacoPosition, MonacoWord } from './types';
 import { analyzeSQLClauses, extractTableFromFROMClause, resolveAliasInWHERE, extractTableFromSelectOnly } from './parser';
 import { parseQueryContext } from './contextAnalyzer';
-import { extractCurrentWord } from './wordExtractor';
 import { createMatchingTableSuggestions, createFallbackSuggestions } from './fallback-handler';
-import { buildScopeStack, type SelectScope } from './scopeStack';  // New Scope Stack integration
+import { buildScopeStack, type SelectScope, type ParsedQueryStack } from './scopeStack';  // New Scope Stack integration
 
 // 절별 자동완성 모듈
 import { handleWhereCompletion } from './where-suggestions';
 import { handleFromCompletion } from './from-suggestions';
 import { handleSelectOnlyCompletion } from './select-suggestions';
 import { handleOrderByCompletion } from './order-by-suggestions';
-import { extractScopedAliases } from './scope';
 
 export interface CompletionContext {
     modelValue: string;        
-    position: any;             
-    word: any;                 
+    position: MonacoPosition;             
+    word?: MonacoWord;                 
     sqlKeywords: string[];     
     tableColumns?: TableColumns  
 }
@@ -31,12 +29,11 @@ export interface CompletionContext {
  */
 export function createCompletionSuggestions(
     modelValue: string,        
-    position: any,             
-    word: any,                 
+    position: MonacoPosition,             
+    word: MonacoWord,                 
     sqlKeywords: string[],     
-    tableColumns?: TableColumns,  
-    monacoInstance?: any  // Monaco 객체 추가
-): any[] {
+    tableColumns?: TableColumns  
+): CompletionItem[] {
     // 1. 커서 위치 분석 - 전용 모듈 delegations
     const parsedContext = parseQueryContext(modelValue, position);
     if (!parsedContext) return [];
@@ -48,7 +45,7 @@ export function createCompletionSuggestions(
     // 변수들을 먼저 선언 (if 블록 범위 밖에서 사용할 수 있도록)
     let textBeforeCursor: string = '';
     let effectiveCurrentWord: string = '';
-    let currentWordUpper: string = '';
+    const currentWordUpper: string = '';
 
     // 2. Monaco 의 실제 라인 텍스트에서 정확하게 추출 (앞의 쿼리들에 상관없이 정확히)
     const allLines = modelValue.split('\n');
@@ -77,8 +74,6 @@ export function createCompletionSuggestions(
             }
         }
 
-        const currentWordUpper = effectiveCurrentWord;  // Monaco 에서 계산 (이전 line에서 선언되었으므로 재선언 안함)
-
         // Monaco 에서 계산한 텍스트를 기반으로 절 분석 등 모든 작업 수행
         // 하지만 절 분석에는 전체 쿼리 사용 (짧은 부분만 보면 FROM 을 못 찾음!)
         const textAtCursor = currentQuery.substring(0, cursorOffsetInQuery || 0);
@@ -98,7 +93,7 @@ export function createCompletionSuggestions(
     // 3. 절 분석 (nested query 고려 - 새로 구현된 Scope Stack 사용)
     let aliasToTableName: Record<string, string> = {};
     let activeScopeDepth = 0;
-    let parsedStack: any = null;  // Store parsedStack for access outside try-catch
+    let parsedStack: ParsedQueryStack | null = null;  // Store parsedStack for access outside try-catch
     
     try {
         // NEW: Use scope stack for proper nested query handling
@@ -153,14 +148,14 @@ export function createCompletionSuggestions(
     
     // For backward compatibility with existing clause analyzer, we still call it
     // BUT priority is given to activeScope from scopeStack for all nested query decisions
-    let { currentClause, lastFromIdx } = analyzeSQLClauses(currentQuery, cursorOffsetFinal);
+    let { currentClause } = analyzeSQLClauses(currentQuery, cursorOffsetFinal);
     
     // CRITICAL FIX: Override currentClause based on activeScope context for nested queries
     // If we're in a nested scope (activeScopeDepth > 0) and activeScope has no FROM clause yet,
     // NEVER fall back to outer query's FROM - force SELECT-only mode
     if (parsedStack && parsedStack.cursorContext.activeScope) {
         const activeScopeClauses = parsedStack.cursorContext.activeScope.clauses;
-        const hasActiveFromClause = activeScopeClauses.some((c: any) => c.type === 'FROM');
+        const hasActiveFromClause = activeScopeClauses.some((c: SelectScope['clauses'][number]) => c.type === 'FROM');
         
         // Check cursor position in current scope
         const lastKeywordInCurrentScope = activeScopeClauses[activeScopeClauses.length - 1];
@@ -195,14 +190,11 @@ export function createCompletionSuggestions(
     
     // CRITICAL FIX #2: Alias.column incomplete detection (e.g., "SELECT B." or "WHERE T.")
     // If user typed "alias.", suggest columns from that table
-    let isInsideSelectOnly = false;  // Declare early to avoid hoisting issues
-    
     if (effectiveCurrentWord && effectiveCurrentWord.endsWith('.') && effectiveCurrentWord.length > 1) {
         const aliasName = effectiveCurrentWord.slice(0, -1); // Remove trailing dot
         
         // Force SELECT-only mode if we have a matching alias for that table
         if (aliasName && aliasToTableName[aliasName]) {
-            isInsideSelectOnly = true;
             currentClause = null;  // Treat as SELECT-only to trigger column suggestions
         } else if (!aliasName) {
             console.warn('[Completion] Alias "." detected but no alias name found');
@@ -220,11 +212,9 @@ export function createCompletionSuggestions(
     let partialNameFromInput: string | null = null;
     let isDotFormatWithoutTrailingDot: boolean = false;  // "A<P>" 패턴 (A.P 에서 P 입력 중)
 
-    if (currentClause === 'FROM') {
-        isInsideSelectOnly = true;
-        
+if (currentClause === 'FROM') {
         // Nested query 처리: 현재 섹션만 파싱 - activeScope 의 FROM 절 범위 사용
-        let textToParse = textBeforeCursor;
+        const textToParse = textBeforeCursor;
         // TODO: Implement proper scoped parsing using activeScope boundaries
         
         const result = extractTableFromFROMClause(textToParse, tableColumns);
@@ -262,8 +252,6 @@ export function createCompletionSuggestions(
         partialNameFromInput = result.partialNameFromInput;
 
     } else if (!currentClause) {
-        isInsideSelectOnly = true;
-        
         //  X. 형식 감지: 마지막 글자가 "." 인지 확인 (A. 입력 직후, 컬럼 입력 시작 안 함)
         let isJustDotAfterAlias = false;
         let previousCharIsSpace = false;

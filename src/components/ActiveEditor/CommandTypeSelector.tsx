@@ -13,25 +13,12 @@ interface CommandTypeSelectorProps {
  * SQL 명령어 타입 선택 (SELECT / EXECUTE / PROCEDURE) 라디오 버튼 컴포넌트
  */
 export const CommandTypeSelector: React.FC<CommandTypeSelectorProps> = ({ activeTabId }) => {
-    const { register, watch } = useFormContext();
+    const { register } = useFormContext();
     const updateTab = useTabsStore((state) => state.updateTab);
 
     const handleCmdTypeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        console.log(' [Radio Change] cmdType 변경:', e.target.value);
-        
         if (activeTabId) {
             updateTab(activeTabId, { cmdType: e.target.value as CommandTypeValue });
-            console.log('|  store 업데이트 완료:', { tabId: activeTabId, newCmdType: e.target.value });
-            
-            setTimeout(() => {
-                const currentState = useTabsStore.getState();
-                const currentTab = currentState.tabs.find(t => t.id === activeTabId);
-                console.log('| 저장된 상태 확인:', { 
-                    tabId: activeTabId, 
-                    storeCmdType: currentTab?.cmdType, 
-                    sameAsInput: currentTab?.cmdType === e.target.value 
-                });
-            }, 50);
         }
     };
 

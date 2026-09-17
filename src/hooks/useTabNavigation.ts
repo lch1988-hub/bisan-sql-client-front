@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useCallback } from 'react';
-import { useTabsStore } from '@/stores/tabsStore';
+import { useTabsStore, type TabData } from '@/stores/tabsStore';
 
 interface UseTabNavigationOptions {
   onTabSwitch?: () => void;
@@ -37,7 +37,7 @@ export function useTabNavigation(options: UseTabNavigationOptions = {}) {
   }, [onTabSwitch]);
 
   // 커서 위치 복원 기능 (재시도 로직 및 스크롤 복원 포함)
-  const restoreCursorPosition = useCallback(async (activeTab: any, maxRetries = 3): Promise<{ lineNumber: number; column: number; restoredFromSave: boolean } | null> => {
+  const restoreCursorPosition = useCallback(async (activeTab: TabData, maxRetries = 3): Promise<{ lineNumber: number; column: number; restoredFromSave: boolean } | null> => {
     if (!activeTab?.id || typeof window === 'undefined') {
       console.warn('[useTabNavigation] 유효하지 않은 탭:', activeTab);
       return null;
@@ -48,11 +48,10 @@ export function useTabNavigation(options: UseTabNavigationOptions = {}) {
     const tryRestore = (): Promise<{ lineNumber: number; column: number; restoredFromSave: boolean } | null> => {
       return new Promise((resolve) => {
         setTimeout(async () => {
-          const monacoRef = (window as any).monacoInstanceRef;
+          const monacoRef = window.monacoInstanceRef;
           
           if (!monacoRef?.editor || !monacoRef.editor.getModel()) {
             attempts++;
-            console.log(`[useTabNavigation] Monaco 준비 안됨 (시도 ${attempts}/${maxRetries})`);
             
             if (attempts < maxRetries) {
               resolve(tryRestore());
@@ -73,21 +72,11 @@ export function useTabNavigation(options: UseTabNavigationOptions = {}) {
               return;
             }
 
-            console.log('[useTabNavigation] 복원 시도:', {
-              tabId: currentTabData.id,
-              tabName: currentTabData.name,
-              savedCursorPos: currentTabData.cursorPosition,
-              sqlLength: (currentTabData.sql || '').length,
-              expectedRestore: currentTabData.cursorPosition > 0 && currentTabData.cursorPosition <= (currentTabData.sql || '').length
-            });
-
             const savedCursorPos = currentTabData?.cursorPosition ?? 0;
             const currentSqlLength = (currentTabData?.sql || '').length;
 
             if (savedCursorPos > 0 && savedCursorPos <= currentSqlLength) {
               // 저장된 커서 위치가 있으면 복원
-              console.log(`[useTabNavigation]  저장된 위치 ${savedCursorPos}로 복원 중...`);
-              
               const position = monacoRef.editor.getModel().getPositionAt(savedCursorPos);
               
               // 1. 커서 위치 설정
@@ -99,7 +88,6 @@ export function useTabNavigation(options: UseTabNavigationOptions = {}) {
               // 3. 포커스 집중
               try {
                 monacoRef.editor.focus();
-                console.log('[useTabNavigation]  포커스 설정 완료');
               } catch (e) {
                 console.warn('[useTabNavigation] 포커스 실패:', e);
               }
@@ -111,20 +99,11 @@ export function useTabNavigation(options: UseTabNavigationOptions = {}) {
               });
             } else {
               // 저장된 위치가 없으면 맨 끝으로 이동하고 위치 저장
-              console.log(`[useTabNavigation] ℹ️ 저장된 위치 없음. 맨끝 (${currentSqlLength}자) 으로 이동`);
-              
               const model = monacoRef.editor.getModel();
               const lastLine = model.getLineCount();
               const lastCol = Math.max(1, model.getLineLength(lastLine)) + 1;
               const endOffset = model.getOffsetAt({ lineNumber: lastLine, column: lastCol });
               
-              console.log('[useTabNavigation] 맨끝 위치:', { 
-                line: lastLine, 
-                col: lastCol, 
-                offset: endOffset,
-                sqlLength: currentSqlLength
-              });
-
               monacoRef.editor.setPosition({ lineNumber: lastLine, column: lastCol });
               
               // 스크롤도 맨끝으로
@@ -152,7 +131,6 @@ export function useTabNavigation(options: UseTabNavigationOptions = {}) {
                   sql: currentTabData.sql || '',
                   cursorPosition: savePos > 0 ? savePos : lastLine * 80 + lastCol
                 });
-                console.log('[useTabNavigation] 위치 저장:', savePos);
               }
 
               resolve({ 

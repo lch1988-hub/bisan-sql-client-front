@@ -19,8 +19,8 @@ export const MetadataSidebar: React.FC = () => {
         }
     };
 
-    const handleRowClick = (row: { TABLE_NAME?: string }) => {
-        if (row.TABLE_NAME) {
+    const handleRowClick = (row: Record<string, string | number | null>) => {
+        if (typeof row.TABLE_NAME === 'string' && row.TABLE_NAME) {
             setSelectedTable(row.TABLE_NAME);
         }
     };

@@ -4,7 +4,7 @@
  * - 아직 FROM 이 없는 상태이므로 첫 테이블 입력 중으로 간주
  */
 
-import type { TableColumns, CompletionItem } from './types';
+import type { TableColumns, CompletionItem, MonacoLanguages } from './types';
 
 /**
  * SELECT-only 에서 테이블명 자동완성 제언 생성
@@ -12,7 +12,7 @@ import type { TableColumns, CompletionItem } from './types';
 export function createSelectTableSuggestions(
     partialName: string,
     tableColumns: TableColumns | undefined,
-    monacoLanguages: any
+    monacoLanguages: MonacoLanguages
 ): CompletionItem[] {
     if (!partialName) return [];
 
@@ -39,7 +39,7 @@ export function createSelectTableSuggestions(
 export function createSelectFallbackSuggestions(
     tableColumns: TableColumns | undefined,
     sqlKeywords: string[],
-    monacoLanguages: any
+    monacoLanguages: MonacoLanguages
 ): CompletionItem[] {
     if (!tableColumns) return [];
 
@@ -91,7 +91,7 @@ export function handleSelectOnlyCompletion(
     effectiveCurrentWord?: string,  // "X." 처리를 위한 추가 파라미터
     isDotFormatWithoutTrailingDot: boolean = false  //  "A<char>" 패턴 (예: A.P 에서 P 입력 중)
 ): CompletionItem[] {
-    const monacoLanguages = (window as any).monaco?.languages;
+    const monacoLanguages = window.monaco?.languages;
     if (!monacoLanguages) return [];
 
     // NEW: "X." 형식 처리 - alias 가 끝나는 점 바로 다음 (컬럼 제안 필요)

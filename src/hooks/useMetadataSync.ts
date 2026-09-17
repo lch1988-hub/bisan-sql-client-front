@@ -9,9 +9,8 @@ import { useMetadataStore } from '@/stores/metadataStore';
  */
 export function useMetadataSync(options: { 
   triggerAutocomplete?: boolean; 
-  loggerPrefix?: string 
 } = {}) {
-  const { triggerAutocomplete = true, loggerPrefix = '[ActiveEditor]' } = options;
+  const { triggerAutocomplete = true } = options;
 
   // 메타데이터 동기화 함수
   const syncMetadata = useCallback(() => {
@@ -21,7 +20,6 @@ export function useMetadataSync(options: {
     const columnsByTable = useMetadataStore.getState().columnsByTable;
     
     if (!tables || tables.length === 0) {
-      console.log(`${loggerPrefix} 메타데이터 없음`);
       return null;
     }
 
@@ -42,17 +40,11 @@ export function useMetadataSync(options: {
     });
 
     // Monaco 가 참조하는 전역 변수 설정
-    (window as any).sqlAutoCompleteKeywords = tableNames;
-    (window as any).sqlTableColumns = tableColumns;
+    window.sqlAutoCompleteKeywords = tableNames;
+    window.sqlTableColumns = tableColumns;
     
-    console.log(`${loggerPrefix} 메타데이터 바인딩:`, { 
-      tables: tableNames.length,
-      sampleTables: Object.keys(tableColumns).slice(0, 5),
-      totalColumnCount: Object.values(tableColumns).flat().length
-    });
-
     return { tableNames, tableColumns };
-  }, [loggerPrefix]);
+  }, []);
 
   // 메타데이터 변경 감지 및 동기화
   useEffect(() => {
@@ -64,18 +56,15 @@ export function useMetadataSync(options: {
       (newState, prevState) => {
         if (newState.tables !== prevState?.tables || 
             newState.columnsByTable !== prevState?.columnsByTable) {
-          console.log(`${loggerPrefix} 메타데이터 변경 감지:`, 
-            newState.tables ? newState.tables.length : 0);
-          
           syncMetadata();
           
           // Monaco 자동완성 트리거 (옵션)
           if (triggerAutocomplete) {
-            const monacoRef = (window as any).monacoInstanceRef;
+            const monacoRef = window.monacoInstanceRef;
             if (monacoRef?.editor) {
               try {
                 monacoRef.editor.trigger('keyboard', 'editor.action.triggerSuggest', {});
-              } catch (e) {
+              } catch {
                 // ignore 트리거 실패
               }
             }
@@ -89,7 +78,7 @@ export function useMetadataSync(options: {
         unsubscribe();
       }
     };
-  }, [syncMetadata, triggerAutocomplete, loggerPrefix]);
+  }, [syncMetadata, triggerAutocomplete]);
 
   // 외부에서 수동으로 메타데이터 동기화를 트리거하고 싶을 때 사용
   const forceSync = useCallback(() => {

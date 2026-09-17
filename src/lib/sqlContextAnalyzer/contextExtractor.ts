@@ -37,7 +37,6 @@ export function parseCteDefinitions(sql: string): AliasMapping {
             if (nameMatch?.[1]) {
                 const cteName = nameMatch[1].toUpperCase();
                 cteAliases[cteName] = `(CTE:${cteName})`;  // CTE 임을 표시
-                console.log('[parseCteDefinitions] Registered CTE as virtual table:', cteName);
             }
             currentCte = '';
         } else {
@@ -51,7 +50,6 @@ export function parseCteDefinitions(sql: string): AliasMapping {
     if (nameMatch?.[1]) {
         const cteName = nameMatch[1].toUpperCase();
         cteAliases[cteName] = `(CTE:${cteName})`;
-        console.log('[parseCteDefinitions] Registered CTE as virtual table:', cteName);
     }
     
     return cteAliases;

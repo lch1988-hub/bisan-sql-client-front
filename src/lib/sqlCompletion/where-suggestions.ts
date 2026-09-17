@@ -4,7 +4,7 @@
  * - 점없는 입력일 때: 테이블명/alias 제안  
  */
 
-import type { TableColumns, CompletionItem } from './types';
+import type { TableColumns, CompletionItem, MonacoLanguages } from './types';
 
 /**
  * WHERE 절에서 컬럼 자동완성 제언 생성 (alias.column 형식)
@@ -12,9 +12,9 @@ import type { TableColumns, CompletionItem } from './types';
 export function createWhereColumnSuggestions(
     tableName: string,
     columns: string[],
-    currentWordUpper: string,  // e.g., "A." or "A.CHANGE_"  
+    currentWordUpper: string,  // e.g., "A." or "A.CHANGE_" 
     aliasName: string,         // e.g., "A"
-    monacoLanguages: any
+    monacoLanguages: MonacoLanguages
 ): CompletionItem[] {
     // Extract the column part after the dot (e.g., "CHANGE_DATE" from "A.CHANGE_")
     const partialColumn = currentWordUpper.includes('.') 
@@ -58,7 +58,7 @@ export function createWhereColumnSuggestions(
 export function createWhereTableSuggestions(
     partialName: string,
     tableColumns: TableColumns | undefined,
-    monacoLanguages: any
+    monacoLanguages: MonacoLanguages
 ): CompletionItem[] {
     if (!partialName) return [];
 
@@ -85,7 +85,7 @@ export function createWhereTableSuggestions(
 export function createWhereFallbackSuggestions(
     tableColumns: TableColumns | undefined,
     sqlKeywords: string[],
-    monacoLanguages: any
+    monacoLanguages: MonacoLanguages
 ): CompletionItem[] {
     if (!tableColumns) return [];
 
@@ -139,7 +139,7 @@ export function handleWhereCompletion(
     tableColumns: TableColumns | undefined,
     sqlKeywords: string[]
 ): CompletionItem[] {
-    const monacoLanguages = (window as any).monaco?.languages;
+    const monacoLanguages = window.monaco?.languages;
     if (!monacoLanguages) return [];
 
     // Case 1: alias.column 형식 - 컬럼 제안
@@ -152,7 +152,6 @@ export function handleWhereCompletion(
 
         //  [DEBUG] Check if table exists in metadata
         const allTableKeys = Object.keys(tableColumns || {});
-        const tableExistsInMetadata = allTableKeys.includes(targetType.toUpperCase());
 
         //  [CRITICAL] First try exact key match, then case-insensitive
         let columns = tableColumns?.[targetType];
@@ -229,14 +228,6 @@ export function handleWhereCompletion(
             // Still nothing - fall back to keywords only
             return createWhereFallbackSuggestions(tableColumns, sqlKeywords, monacoLanguages);
         }
-
-        const columnSuggestions = createWhereColumnSuggestions(
-            usedTableKey,
-            columns || [],
-            currentWordUpper,  // Will be "A." or "A.CHANGE_" 
-            partialNameFromInput || '',  // The alias "A"
-            monacoLanguages
-        );
 
         const allColumns = (columns || []).slice(0, 50).map(col => ({
             label: col,

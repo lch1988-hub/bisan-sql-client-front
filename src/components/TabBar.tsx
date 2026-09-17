@@ -8,7 +8,6 @@ export const TabBar: React.FC = () => {
     const { tabs, activeTabId } = useTabsStore();
     const addTab = useTabsStore((state) => state.addTab);
     const switchTab = useTabsStore((state) => state.switchTab);
-    const activeTab = tabs.find(data => data.id === activeTabId);
 
     // Alt+Arrow 키로 탭 전환 (이전/다음 탭)
     useEffect(() => {

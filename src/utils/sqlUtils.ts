@@ -22,7 +22,6 @@ export function extractCurrentQuery(sql: string, cursorPosition: number): string
     
     // 세미콜론이 없으면 전체 반환
     if (semicolonPositions.length === 0) {
-        console.log('[extractCurrentQuery] ; 없음, 전체 반환');
         return sql.trim();
     }
     

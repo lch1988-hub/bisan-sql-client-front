@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import dynamic from 'next/dynamic';
 
 // ThemeToggler 는 SSR 비활성화 (Client Component 내에서 safe)
@@ -29,8 +29,6 @@ export function useInitTheme() {
 
     // HTML 태그에 클래스 적용
     document.documentElement.classList.toggle('dark', initialTheme === 'dark');
-    
-    console.log(`[ThemeManager] 초기 테마 적용: ${initialTheme}`);
   }, []);
 }
 

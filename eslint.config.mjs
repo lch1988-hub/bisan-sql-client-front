@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Compiled probe artifacts (integration test output only)
+    ".probe-build/**",
   ]),
 ]);
 

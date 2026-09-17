@@ -251,7 +251,7 @@ function resolveActiveScope(
   } else if (!activeScope) {
     // Only fallback to parent scopes when there's NO active scope at all
     // (e.g., after closing paren has been processed)
-    lastKeyword = determineFallbackFromParentScopes(scopesByDepth, actualDepth - 1, calculatedCursorDepth);
+    lastKeyword = determineFallbackFromParentScopes(scopesByDepth, actualDepth - 1);
   }
 
   return {
@@ -317,8 +317,7 @@ function findLastClauseBeforePosition(
  */
 function determineFallbackFromParentScopes(
   scopesByDepth: (SelectScope | null)[], 
-  startingDepth: number,
-  originalCursorDepth: number
+  startingDepth: number
 ): ScopeClause | null {
   for (let d = startingDepth; d >= 0; d--) {
     const scope = scopesByDepth[d];

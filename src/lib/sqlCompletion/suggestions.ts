@@ -3,7 +3,7 @@
  * 절별 특수 로직은 where-suggestions.ts, from-suggestions.ts, select-suggestions.ts 에서 처리
  */
 
-import type { TableColumns, CompletionItem } from './types';
+import type { CompletionItem, MonacoLanguages } from './types';
 
 /**
  * 중복 제언을 제거하는 유틸리티 함수
@@ -22,7 +22,7 @@ export function deduplicateByLabel(items: CompletionItem[]): CompletionItem[] {
  */
 export function createKeywordSuggestions(
     sqlKeywords: string[],
-    monacoLanguages: any
+    monacoLanguages: MonacoLanguages
 ): CompletionItem[] {
     return sqlKeywords.map(keyword => ({
         label: keyword.toUpperCase(),

@@ -14,10 +14,10 @@ provideGlobalGridOptions({
 }, 'deep');
 
 interface DynamicGridProps {
-    data: any[] | null | undefined;
+    data: Record<string, string | number | null>[] | null | undefined;
     columns?: string[];  // 백엔드에서 보낸 컬럼 순서 (선택)
     height?: string;
-    onRowClick?: (row: any) => void;
+    onRowClick?: (row: Record<string, string | number | null>) => void;
     className?: string;
 }
 
@@ -40,8 +40,6 @@ export default function DynamicSharedGrid({
 
         const gridInstance = gridApi as any;
 
-        console.log('AG-Grid CSV 다운로드 시작...');
-
         try {
             gridInstance.exportDataAsCsv({
                 allColumns: true,
@@ -50,8 +48,6 @@ export default function DynamicSharedGrid({
                 columnSeparator: ',',
                 fileName: 'query-result.csv'
             });
-
-            console.log(' CSV 다운로드 완료');
         } catch (error) {
             console.error('CSV 다운로드 중 오류:', error);
             alert('CSV 다운로드 중 오류가 발생했습니다!');
@@ -140,10 +136,6 @@ export default function DynamicSharedGrid({
         resizable: true
     }), []);
 
-    if (!data) {
-        return <div className="p-5 text-center">데이터를 기다리는 중입니다...</div>;
-    }
-    
     const rowSelection = useMemo(() => {
       return {
         mode: 'multiRow',
@@ -151,6 +143,10 @@ export default function DynamicSharedGrid({
       } as const;
     }, []);
 
+    if (!data) {
+        return <div className="p-5 text-center">데이터를 기다리는 중입니다...</div>;
+    }
+    
     return (
         <AgGridProvider modules={[AllCommunityModule]}>
             <div className={`ag-theme-quartz h-full w-full ${className}`} style={{height: height, width: '100%', display: 'flex', flexDirection: 'column'}}>
@@ -161,7 +157,6 @@ export default function DynamicSharedGrid({
                     pagination={false} // 페이지네이션 제거 - 모두 표시
                     animateRows={true}
                     onGridReady={(params) => {
-                        console.log(' 그리드 API 초기화됨');
                         setGridApi(params.api);
                     }}
                     onRowClicked={(params) => {

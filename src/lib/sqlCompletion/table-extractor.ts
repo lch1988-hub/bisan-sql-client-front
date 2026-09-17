@@ -48,7 +48,7 @@ export function extractTableFromFROMClause(
     //  **quote 제거 후 대문자 변환**: "E  E  E  
     let partialRawName = parts[0] || '';
     partialRawName = partialRawName.replace(/^["`']|["`']$/g, '');  // quote 제거  
-    let partialName = partialRawName.toUpperCase();  // 그 다음 대문자
+    const partialName = partialRawName.toUpperCase();  // 그 다음 대문자
 
     if (!partialName) {
         return {targetTableName: null, partialNameFromInput: null};
@@ -99,7 +99,7 @@ export function extractTableFromSelectOnly(
         return { targetTableName: null, partialNameFromInput: null };
     }
 
-    let potentialTable: string | undefined = Object.values(aliasToTableName)[0];
+    const potentialTable: string | undefined = Object.values(aliasToTableName)[0];
     
     const metaKeys = Object.keys(tableColumns || {});
     const allMatches = metaKeys.filter((key: string) => 

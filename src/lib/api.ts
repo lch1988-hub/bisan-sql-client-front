@@ -1,10 +1,6 @@
 // src/lib/api.ts
-import axios from 'axios';
 
-//  1. 현재 환경이 빌드(배포) 상태인지 확인
-const IS_PROD = process.env.NODE_ENV === 'production';
-
-//  2. 파이썬 백엔드 주소 설정
+// 파이썬 백엔드 주소 설정
 export const BACKEND_URL = 'http://127.0.0.1:5000';
 
 /**

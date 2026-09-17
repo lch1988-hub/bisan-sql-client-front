@@ -26,7 +26,6 @@ export const ResultDisplay: React.FC<ResultDisplayProps> = ({
     activeTab,
     fullDataLoading,
     loadedFullData,
-    panelHeight = 400, // 기본값 400px
 }) => {
     if (!hasMounted) {
         return <div className="p-5 text-center"><p className="text-gray-500 dark:text-slate-400">조회된 데이터가 없습니다.</p></div>;

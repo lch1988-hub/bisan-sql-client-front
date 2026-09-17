@@ -4,7 +4,7 @@
  * - nested query 처리 고려
  */
 
-import type { TableColumns, CompletionItem } from './types';
+import type { TableColumns, CompletionItem, MonacoLanguages } from './types';
 
 /**
  * FROM 절에서 테이블명 자동완성 제언 생성
@@ -12,7 +12,7 @@ import type { TableColumns, CompletionItem } from './types';
 export function createFromTableSuggestions(
     partialName: string,
     tableColumns: TableColumns | undefined,
-    monacoLanguages: any
+    monacoLanguages: MonacoLanguages
 ): CompletionItem[] {
     if (!partialName) return [];
 
@@ -39,7 +39,7 @@ export function createFromTableSuggestions(
 export function createFromFallbackSuggestions(
     tableColumns: TableColumns | undefined,
     sqlKeywords: string[],
-    monacoLanguages: any
+    monacoLanguages: MonacoLanguages
 ): CompletionItem[] {
     if (!tableColumns) return [];
 
@@ -90,7 +90,7 @@ export function handleFromCompletion(
     tableColumns: TableColumns | undefined,
     sqlKeywords: string[]
 ): CompletionItem[] {
-    const monacoLanguages = (window as any).monaco?.languages;
+    const monacoLanguages = window.monaco?.languages;
     if (!monacoLanguages) return [];
 
     // 테이블명 제안 우선

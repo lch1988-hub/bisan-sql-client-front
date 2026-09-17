@@ -3,7 +3,7 @@
  * GROUP BY, ORDER BY 등 다른 절의 fallback 로직 전용
  */
 
-import type { TableColumns, CompletionItem } from './types';
+import type { CompletionItem } from './types';
 
 /**
  * 테이블명 일치하는 suggestions 생성
@@ -12,7 +12,7 @@ export function createMatchingTableSuggestions(
     partialNameFromInput: string,
     tableColumns: Record<string, string[]>
 ): CompletionItem[] | null {
-    const MONACO_KINDS = (window as any).monaco?.languages;
+    const MONACO_KINDS = window.monaco?.languages;
     
     if (!MONACO_KINDS) return null;
 
@@ -40,7 +40,7 @@ export function createFallbackSuggestions(
     sqlKeywords: string[],
     tableColumns?: Record<string, string[]>
 ): CompletionItem[] {
-    const MONACO_KINDS = (window as any).monaco?.languages;
+    const MONACO_KINDS = window.monaco?.languages;
     
     if (!MONACO_KINDS) return [];
 
