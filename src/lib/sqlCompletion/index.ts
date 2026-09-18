@@ -129,12 +129,18 @@ export function createCompletionSuggestions(
             aliasToTableName = {};  // Explicitly set to empty, NEVER fall back to outer query here!
         }
         
-        // Fallback to full query extraction ONLY when we truly have no scope context at all
-        // This should RARELY happen - only for malformed queries or edge cases
-        if (Object.keys(aliasToTableName).length === 0 && !activeScope) {
-            console.warn('[Completion] No active scope found, falling back to legacy (should be rare)');
+        // Fallback to full query extraction if we have no valid mapping yet
+        // This handles edge cases where scope detection fails or nested queries confuse the parser
+        if (Object.keys(aliasToTableName).length === 0) {
+            console.warn('[Completion] No alias mappings found, falling back to full query extraction');
             const fallbackMapping = extractFromClause(currentQuery);
-            aliasToTableName = fallbackMapping || {};
+            if (fallbackMapping && Object.keys(fallbackMapping).length > 0) {
+                aliasToTableName = fallbackMapping;
+                console.log('[Completion] Fallback succeeded - found tables:', Object.keys(aliasToTableName));
+            } else {
+                console.warn('[Completion] Fallback also failed - no tables extracted');
+                aliasToTableName = {};
+            }
         }
     } catch(err) {
         console.error('[Completion] Scoped extraction failed:', err);

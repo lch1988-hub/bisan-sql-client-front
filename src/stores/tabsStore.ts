@@ -31,9 +31,47 @@ export interface TabData {
 
 const DEFAULT_TAB_ID = 'default-sql-tab';
 
-const createDefaultTab = (id?: string): TabData => ({
+/**
+ * 고유한 탭 인덱스 번호 생성
+ * 기존 탭들에서 [N] 패턴의 숫자를 추출하여 가장 작은 빈 번호를 반환
+ */
+function generateUniqueTabIndex(existingTabs: TabData[]): number {
+  const usedNumbers = existingTabs
+    .map(tab => {
+      const match = tab.name.match(/\[(\d+)\]/);
+      return match ? parseInt(match[1], 10) : null;
+    })
+    .filter((n): n is number => n !== null);
+
+  if (usedNumbers.length === 0) return 1;
+
+  const sorted = [...usedNumbers].sort((a, b) => a - b);
+  
+  // 가장 작은 빈 번호 찾기
+  for (let i = 1; i <= sorted.length + 1; i++) {
+    if (!sorted.includes(i)) {
+      return i;
+    }
+  }
+
+  return sorted[sorted.length - 1] + 1;
+}
+
+// 배열 순서 재배열 헬퍼 함수 (arrayMove替代)
+function arrayMove<T>(arr: T[], oldIndex: number, newIndex: number): T[] {
+  const newArr = [...arr];
+  if (oldIndex < 0 || oldIndex >= newArr.length || newIndex < 0 || newIndex >= newArr.length) {
+    return newArr;
+  }
+  
+  const [item] = newArr.splice(oldIndex, 1);
+  newArr.splice(newIndex, 0, item);
+  return newArr;
+}
+
+const createEmptyTab = (id?: string): TabData => ({
     id: id ?? `tab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-    name: '새 SQL',
+    name: '', // 나중에 번호 할당
     sql: '',
     cmdType: COMMAND_TYPE.SELECT,  // 상수 사용!
     scrollPos:0,
@@ -46,6 +84,15 @@ const createDefaultTab = (id?: string): TabData => ({
     lastUpdated: Date.now(),
     createdAt: Date.now(),
 });
+
+const createDefaultTab = (existingTabs: TabData[], id?: string): TabData => {
+    const newId = id ?? `tab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const newIndex = generateUniqueTabIndex(existingTabs);
+    return {
+        ...createEmptyTab(newId),
+        name: `[${newIndex}]`,
+    };
+};
 
 // ========================================
 // 탭 관리 인터페이스
@@ -60,6 +107,7 @@ export interface TabsState {
     setActiveTab: (id: string) => void;
     switchTab: (direction: 'left' | 'right') => void;
     updateTab: (id: string, updates: Partial<TabData>) => void;
+    reorderTabs: (oldIndex: number, newIndex: number) => void;
     clearAllTabs: () => void;
     
     getActiveTab: () => TabData | null;
@@ -99,7 +147,7 @@ export const useTabsStore = create<TabsState>()(
             }
             
             if (initialTabs.length === 0) {
-                initialTabs = [createDefaultTab(DEFAULT_TAB_ID)];
+                initialTabs = [createDefaultTab([], DEFAULT_TAB_ID)];
             } else {
                 // 기존 탭 복원 - data 필드는 IndexedDB 에서 비동기로 복원
                 
@@ -117,7 +165,8 @@ export const useTabsStore = create<TabsState>()(
                     const [defaultTab, ...rest] = initialTabs;
                     initialTabs = [defaultTab, ...rest];
                 } else if (defaultIndex === -1) {
-                    initialTabs.unshift(createDefaultTab(DEFAULT_TAB_ID));
+                    // 첫 번째 탭 없으니 새 추가 - 기존 탭 목록을 넘겨 빈 번호 찾기
+                    initialTabs.unshift(createDefaultTab(initialTabs, DEFAULT_TAB_ID));
                 }
             }
 
@@ -129,7 +178,8 @@ export const useTabsStore = create<TabsState>()(
                 
                 addTab: () => {
                     set((state) => {
-                        const newTab = createDefaultTab();  // 항상 기본값 생성
+                        // 기존 탭 목록을 넘겨 빈 번호 찾기
+                        const newTab = createDefaultTab(state.tabs);
                         
                         return {
                             tabs: [...state.tabs, newTab],
@@ -160,7 +210,7 @@ export const useTabsStore = create<TabsState>()(
                         const newTabs = state.tabs.filter((t: TabData) => t.id !== id);
                         
                         if (newTabs.length === 0) {
-                            return { tabs: [createDefaultTab(DEFAULT_TAB_ID)], activeTabId: DEFAULT_TAB_ID };
+                            return { tabs: [createDefaultTab(newTabs, DEFAULT_TAB_ID)], activeTabId: DEFAULT_TAB_ID };
                         }
 
                         let newActiveId = state.activeTabId;
@@ -219,14 +269,21 @@ export const useTabsStore = create<TabsState>()(
                         activeTabId: state.activeTabId,
                     }));
 
-                    // data 변경 시 IndexedDB 에 비동기로 저장 (대용량 처리 최적화)
+                    // data 변경 시 indexed DB 에 비동기로 저장 (대용량 처리 최적화)
                     if (updates.data && typeof window !== 'undefined') {
                         void syncToIndexedDB(id, updates);
                     }
                 },
 
+                reorderTabs: (oldIndex: number, newIndex: number) => {
+                    set((state) => {
+                        const newTabs = arrayMove(state.tabs, oldIndex, newIndex);
+                        return { tabs: newTabs };
+                    });
+                },
+
                 clearAllTabs: () => {
-                    const defaultTab = createDefaultTab(DEFAULT_TAB_ID);
+                    const defaultTab = createDefaultTab([], DEFAULT_TAB_ID);
                     set(() => ({ tabs: [defaultTab], activeTabId: defaultTab.id }));
                 },
 
